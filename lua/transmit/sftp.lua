@@ -132,6 +132,11 @@ function sftp.update_transmit_server_config(server_name, remote)
     Path:new(transmit_server_data):write(vim.json.encode(current_transmit_data), "w")
 end
 
+local function escapePattern(str)
+    local specialCharacters = "([%.%+%-%%%[%]%*%?%^%$%(%)])"
+    return (str:gsub(specialCharacters, "%%%1"))
+end
+
 local function process_next_queue_item()
     local current_queue_item = get_current_queue_item()
 
@@ -164,10 +169,7 @@ local function process_next_queue_item()
 	queue[current_key] = nil
 end
 
-local function escapePattern(str)
-    local specialCharacters = "([%.%+%-%%%[%]%*%?%^%$%(%)])"
-    return (str:gsub(specialCharacters, "%%%1"))
-end
+
 
 function sftp.add_to_queue(type, filename, working_dir)
 	local start_queue = false;
