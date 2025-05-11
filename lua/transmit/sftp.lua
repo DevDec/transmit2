@@ -1,10 +1,13 @@
-local ffi = require("ffi")
 local ffi = require('ffi')
 
--- Load the shared library
-local lib_path = debug.getinfo(1, "S").source:match("@?(.*/)") .. "../../libtransmit.so"
+local plugin_path = vim.fn.expand('%:p:h') -- Gets the directory of the current Lua file
+local lib_path = plugin_path .. '/../../' .. 'libtransmit.so'
 
-local sftp_path = ffi.load(lib_path)
+local sftp_lib, err = ffi.load(lib_path)
+
+if not sftp_lib then
+  vim.api.nvim_err_writeln("Error loading SFTP library: " .. err)
+  return
 
 -- Define the C functions we need
 ffi.cdef[[
