@@ -151,6 +151,9 @@ local function process_next_queue_item()
 	local current_config = sftp.get_sftp_server_config()
 	local current_transmit_data = get_transmit_data()
 
+	local working_dir = current_queue_item.working_dir
+	local file = current_queue_item.filename
+
 	local relative_path =  string.gsub(file, escapePattern(working_dir), '')
 
 	local selected_remote = current_transmit_data[working_dir]['remote']
