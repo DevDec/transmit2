@@ -1,8 +1,20 @@
 local ffi = require('ffi')
 
-local plugin_path = vim.fn.expand('%:p:h') -- Gets the directory of the current Lua file
-local lib_path = plugin_path .. '/' .. 'libtransmit.so'
+local function get_current_lua_file_directory()
+  local info = debug.getinfo(1, 'S')
+  if info and info.source then
+    return vim.fn.fnamemodify(info.source, ':h')
+  end
+  return nil
+end
 
+local plugin_root = get_current_lua_file_directory()
+if not plugin_root then
+  vim.api.nvim_err_writeln("Error: Could not determine plugin directory.")
+  return
+end
+
+local lib_path = plugin_root .. '/' .. 'libtransmit.so'
 local sftp_lib, err = ffi.load(lib_path)
 
 if not sftp_lib then
