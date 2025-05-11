@@ -14,7 +14,7 @@ if not plugin_root then
   return
 end
 
-local lib_path = plugin_root .. '/' .. 'libtransmit.so'
+local lib_path = plugin_root .. '/../../' .. 'libtransmit.so'
 local sftp_lib, err = ffi.load(lib_path)
 
 if not sftp_lib then
