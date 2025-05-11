@@ -1,8 +1,8 @@
 local ffi = require("ffi")
-local lib_path = debug.getinfo(1, "S").source:match("@?(.*/)") .. "../../libtransmit.so"
+local ffi = require('ffi')
 
--- Load the shared object
-local sftp_lib = package.loadlib(lib_path, "*")
+-- Load the shared library
+local sftp_lib = ffi.load('../../libtransmit.so') -- Adjust the path as needed
 
 -- Define the C functions we need
 ffi.cdef[[
