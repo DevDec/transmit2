@@ -15,7 +15,8 @@ if not plugin_root then
 end
 
 local lib_path = plugin_root .. '/../../' .. 'libtransmit.so'
-local sftp_lib, err = ffi.load(lib_path)
+-- local sftp_lib, err = ffi.load(lib_path)
+local sftp_lib, err = ffi.load('/home/declanb/.local/share/nvim/lazy/transmit2/libtransmit.so') -- Adjust the actual path
 
 if not sftp_lib then
   vim.api.nvim_err_writeln("Error loading SFTP library: " .. err)
