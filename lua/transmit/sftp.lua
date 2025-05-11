@@ -1,5 +1,5 @@
 local ffi = require("ffi")
-local sftp_lib = ffi.load("../../libtransmit.so")
+local sftp_lib = ffi.load("../../../libtransmit.so")
 
 -- Define the C functions we need
 ffi.cdef[[
