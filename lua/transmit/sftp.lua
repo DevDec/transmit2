@@ -190,6 +190,8 @@ function sftp.start_connection()
 
 	sftp_lib.init_sftp_session(host, username, identity_file, sftp_session, session, sock)
 
+	vim.print('starting connection');
+
 	while next(queue) do
 		vim.print('running queue items');
 		process_next_queue_item();
