@@ -8,6 +8,7 @@ local sftp_lib, err = ffi.load(lib_path)
 if not sftp_lib then
   vim.api.nvim_err_writeln("Error loading SFTP library: " .. err)
   return
+end
 
 -- Define the C functions we need
 ffi.cdef[[
