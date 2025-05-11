@@ -172,8 +172,6 @@ end
 function sftp.add_to_queue(type, filename, working_dir)
     if sftp.has_active_queue() == false then
         sftp.start_connection()
-
-        start_queue = true
     end
 
     table.insert(queue, {
@@ -190,11 +188,10 @@ function sftp.start_connection()
     local username = config.credentials.username
     local identity_file = config.credentials.identity_file
 
-    local uv = vim.loop
-
 	sftp_lib.init_sftp_session(host, username, identity_file, sftp_session, session, sock)
 
-	while #queue > 0 do
+	while next(queue) do
+		vim.print('running queue items');
 		process_next_queue_item();
 	end
 end
