@@ -1,7 +1,7 @@
 local ffi = require('ffi')
 
 local plugin_path = vim.fn.expand('%:p:h') -- Gets the directory of the current Lua file
-local lib_path = plugin_path .. '/../../' .. 'libtransmit.so'
+local lib_path = plugin_path .. '/' .. 'libtransmit.so'
 
 local sftp_lib, err = ffi.load(lib_path)
 
