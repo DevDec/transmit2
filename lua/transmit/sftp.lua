@@ -170,15 +170,15 @@ local function escapePattern(str)
 end
 
 function sftp.add_to_queue(type, filename, working_dir)
-    if sftp.has_active_queue() == false then
-        sftp.start_connection()
-    end
-
     table.insert(queue, {
         type = type,
         filename = filename,
         working_dir = working_dir,
     })
+
+    if sftp.has_active_queue() == false then
+        sftp.start_connection()
+    end
 end
 
 function sftp.start_connection()
