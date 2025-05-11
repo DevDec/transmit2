@@ -170,15 +170,25 @@ local function escapePattern(str)
 end
 
 function sftp.add_to_queue(type, filename, working_dir)
+	local start_queue = false;
+
+    if sftp.has_active_queue() == false then
+        sftp.start_connection()
+		start_queue = true
+    end
+
     table.insert(queue, {
         type = type,
         filename = filename,
         working_dir = working_dir,
     })
 
-    if sftp.has_active_queue() == false then
-        sftp.start_connection()
-    end
+	if start_queue then
+		while next(queue) do
+			vim.print('running queue items');
+			process_next_queue_item();
+		end
+	end
 end
 
 function sftp.start_connection()
@@ -190,12 +200,6 @@ function sftp.start_connection()
 
 	sftp_lib.init_sftp_session(host, username, identity_file, sftp_session, session, sock)
 
-	vim.print('starting connection');
-
-	while next(queue) do
-		vim.print('running queue items');
-		process_next_queue_item();
-	end
 end
 
 function sftp.working_dir_has_active_sftp_selection(working_dir)
