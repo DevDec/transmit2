@@ -164,7 +164,10 @@ local function process_next_queue_item()
 	end
 
 	if current_queue_item.type == "remove" then
-		sftp_lib.sftp_remove_path_recursive(sftp_session[0], remote_path .. relative_path);
+		local err_ptr = ffi.new("char *[1]")
+		if sftp_lib.sftp_remove_path_recursive(sftp_session[0], remote_path .. relative_path, err_ptr) ~= 0 then
+			vim.print(ffi.string(err_ptr[0]));
+		end
 	end
 
 	local iter = pairs(queue)
