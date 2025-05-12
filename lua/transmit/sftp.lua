@@ -159,23 +159,32 @@ local function process_next_queue_item()
 	local selected_remote = current_transmit_data[working_dir]['remote']
 	local remote_path = current_config['remotes'][selected_remote]
 
-	if current_queue_item.type == "upload" then
-		sftp_lib.upload_file(sftp_session[0], file, remote_path .. relative_path);
+	local function remove_item_from_queue()
+		local iter = pairs(queue)
+		local current_key, _ = iter(queue)
+		queue[current_key] = nil
 	end
 
-	if current_queue_item.type == "remove" then
-		local err_ptr = ffi.new("char *[1]")
-		if sftp_lib.sftp_remove_path_recursive(sftp_session[0], remote_path .. relative_path, err_ptr) ~= 0 then
-			vim.print(ffi.string(err_ptr[0]));
+
+	local function sftp_task(callback)
+		if current_queue_item.type == "upload" then
+			sftp_lib.upload_file(sftp_session[0], file, remote_path .. relative_path);
 		end
+
+		if current_queue_item.type == "remove" then
+			local err_ptr = ffi.new("char *[1]")
+			if sftp_lib.sftp_remove_path_recursive(sftp_session[0], remote_path .. relative_path, err_ptr) ~= 0 then
+				vim.print(ffi.string(err_ptr[0]));
+			end
+		end
+
+        callback()
 	end
 
-	local iter = pairs(queue)
-	local current_key, _ = iter(queue)
-	queue[current_key] = nil
+    local async_handle = vim.loop.new_async(vim.loop.new_work(remove_task))
+    async_handle:send()
+
 end
-
-
 
 function sftp.add_to_queue(type, filename, working_dir)
 	local start_queue = false;
