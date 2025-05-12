@@ -211,6 +211,14 @@ int create_remote_directory_recursively(LIBSSH2_SFTP *sftp_session, const char *
 }
 
 int sftp_remove_path_recursive(LIBSSH2_SFTP *sftp_session, const char *path, char **err_msg) {
+    LIBSSH2_SFTP_ATTRIBUTES stat_attrs;
+    if (!libssh2_sftp_stat(sftp_session, path, &stat_attrs) == 0) {
+		unsigned long err = libssh2_sftp_last_error(sftp_session);
+		if (err == LIBSSH2_FX_NO_SUCH_FILE) {
+			return 0;
+		}
+    }
+
     LIBSSH2_SFTP_HANDLE *dir;
     char buffer[512];
 
