@@ -177,13 +177,10 @@ local function process_next_queue_item()
 				vim.print(ffi.string(err_ptr[0]));
 			end
 		end
-
-        callback()
 	end
 
-    local async_handle = vim.loop.new_async(vim.loop.new_work(sftp_task))
-    async_handle:send()
-
+    local async_handle = vim.loop.new_work(sftp_task, remove_item_from_queue)
+    async_handle:queue()
 end
 
 function sftp.add_to_queue(type, filename, working_dir)
