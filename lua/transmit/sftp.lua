@@ -160,11 +160,11 @@ local function process_next_queue_item()
 	local remote_path = current_config['remotes'][selected_remote]
 
 	if current_queue_item.type == "upload" then
-		sftp_lib.upload_file(sftp_session, file, remote_path .. relative_path);
+		sftp_lib.upload_file(sftp_session[0], file, remote_path .. relative_path);
 	end
 
 	if current_queue_item.type == "remove" then
-		sftp_lib.sftp_remove_path_recursive(sftp_session, remote_path .. relative_path);
+		sftp_lib.sftp_remove_path_recursive(sftp_session[0], remote_path .. relative_path);
 	end
 
 	local iter = pairs(queue)
