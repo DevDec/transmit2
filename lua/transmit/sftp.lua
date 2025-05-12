@@ -165,8 +165,7 @@ local function process_next_queue_item()
 		queue[current_key] = nil
 	end
 
-
-	local function sftp_task(callback)
+	local async = vim.loop.new_async(vim.schedule_wrap(function()
 		if current_queue_item.type == "upload" then
 			sftp_lib.upload_file(sftp_session[0], file, remote_path .. relative_path);
 		end
@@ -177,10 +176,13 @@ local function process_next_queue_item()
 				vim.print(ffi.string(err_ptr[0]));
 			end
 		end
-	end
 
-    local async_handle = vim.loop.new_work(sftp_task, remove_item_from_queue)
-    async_handle:queue()
+		remove_item_from_queue()
+	end))
+
+	vim.defer_fn(function()
+		async:send()
+	end, 0)
 end
 
 function sftp.add_to_queue(type, filename, working_dir)
