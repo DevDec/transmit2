@@ -151,7 +151,7 @@ function sftp.start_connection()
           transmit_phase = "active"
           sftp.process_next()
         elseif transmit_phase == "active" then
-          if line:match("^1|Upload succeeded") or line:match("^1|Remove successful") or line:match("^0|") then
+          if line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
             sftp.process_next()
           end
         end
