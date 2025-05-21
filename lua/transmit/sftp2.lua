@@ -129,6 +129,8 @@ function sftp.start_connection()
 
   local transmit_executable = get_transmit_path()
 
+  transmit_phase = "init"
+
   transmit_job = vim.fn.jobstart({ transmit_executable }, {
     stdout_buffered = false,
     stderr_buffered = false,
