@@ -95,22 +95,19 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
     snprintf(local_path_copy, sizeof(local_path_copy), "%s", local_file);
 
     if (is_directory(local_path_copy)) {
-        char *dir_path = path_copy;
-
-        if (create_remote_directory_recursively(sftp_session, dir_path)) {
-            asprintf(err_msg, "Failed to create remote directory recursively: %s", dir_path);
-            return 1;
-        }
-
-        return 0;
+        // Upload directories not supported in this function
+        asprintf(err_msg, "Uploading directories is not supported: %s", local_path_copy);
+        return 1;
     }
 
+    // Ensure remote directory exists
     char *dir_path = dirname(path_copy);
     if (create_remote_directory_recursively(sftp_session, dir_path)) {
         asprintf(err_msg, "Failed to create remote directory recursively: %s", dir_path);
         return 1;
     }
 
+    // Open remote file with write, create, truncate flags to overwrite if exists
     LIBSSH2_SFTP_HANDLE *sftp_handle = libssh2_sftp_open(
         sftp_session,
         remote_file,
@@ -119,7 +116,8 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
     );
 
     if (!sftp_handle) {
-        asprintf(err_msg, "Unable to open remote file: %s", remote_file);
+        unsigned long err_code = libssh2_sftp_last_error(sftp_session);
+        asprintf(err_msg, "Unable to open remote file '%s' (libssh2 error %lu)", remote_file, err_code);
         return 1;
     }
 
@@ -134,8 +132,10 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
     size_t nread;
     while ((nread = fread(mem, 1, sizeof(mem), local)) > 0) {
         char *ptr = mem;
-        while (nread > 0) {
-            ssize_t nwritten = libssh2_sftp_write(sftp_handle, ptr, nread);
+        size_t remaining = nread;
+
+        while (remaining > 0) {
+            ssize_t nwritten = libssh2_sftp_write(sftp_handle, ptr, remaining);
             if (nwritten < 0) {
                 asprintf(err_msg, "SFTP write error while writing to: %s", remote_file);
                 fclose(local);
@@ -143,14 +143,19 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
                 return 1;
             }
             ptr += nwritten;
-            nread -= nwritten;
+            remaining -= nwritten;
         }
     }
 
     fclose(local);
     libssh2_sftp_close(sftp_handle);
+
+    if (err_msg) {
+        *err_msg = NULL;  // Clear error on success
+    }
     return 0;
 }
+
 
 int create_directory(LIBSSH2_SFTP *sftp_session, const char *directory) {
 	return create_remote_directory_recursively(sftp_session, directory);

@@ -1,4 +1,4 @@
-local sftp = require("transmit.sftp")
+local sftp = require("transmit.sftp2")
 local events = require("transmit.events")
 local util = require("transmit.util")
 

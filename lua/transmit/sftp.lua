@@ -1,44 +1,4 @@
 local ffi = require('ffi')
-
-local function get_current_lua_file_directory()
-  local info = debug.getinfo(1, 'S')
-  if info and info.source then
-    return vim.fn.fnamemodify(info.source, ':h')
-  end
-  return nil
-end
-
-local plugin_root = get_current_lua_file_directory()
-if not plugin_root then
-  vim.api.nvim_err_writeln("Error: Could not determine plugin directory.")
-  return
-end
-
-local lib_path = plugin_root .. '/../../' .. 'libtransmit.so'
--- local sftp_lib, err = ffi.load(lib_path)
-local sftp_lib, err = ffi.load('/home/declanb/.local/share/nvim/lazy/transmit2/libtransmit.so') -- Adjust the actual path
-
-if not sftp_lib then
-  vim.api.nvim_err_writeln("Error loading SFTP library: " .. err)
-  return
-end
-
--- Define the C functions we need
-ffi.cdef[[
-    typedef struct LIBSSH2_SFTP LIBSSH2_SFTP;
-    typedef struct LIBSSH2_SESSION LIBSSH2_SESSION;
-
-    int init_sftp_session(const char *hostname, const char *username, const char *privkey_path, LIBSSH2_SFTP **sftp_session, LIBSSH2_SESSION **session, int *sock);
-    int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *remote_file);
-    int create_directory(LIBSSH2_SFTP *sftp_session, const char *directory);
-    void close_sftp_session(LIBSSH2_SFTP *sftp_session, LIBSSH2_SESSION *session, int sock);
-	int sftp_remove_path_recursive(LIBSSH2_SFTP *sftp_session, const char *path, char **err_msg);
-]]
-
-local sftp_session = ffi.new("LIBSSH2_SFTP *[1]")
-local session = ffi.new("LIBSSH2_SESSION *[1]")
-local sock = ffi.new("int[1]")
-
 local data_path = vim.fn.stdpath("data")
 local Path = require("plenary.path")
 local Job = require('plenary.job')
@@ -231,7 +191,7 @@ function sftp.start_connection()
     local stdout = uv.new_pipe(false)
     local stderr = uv.new_pipe(false)
 
-	sftp_lib.init_sftp_session(host, username, identity_file, sftp_session, session, sock)
+	-- sftp_lib.init_sftp_session(host, username, identity_file, sftp_session, session, sock)
 
 	return vim.fn.jobstart(
 		{
