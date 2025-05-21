@@ -136,6 +136,7 @@ function sftp.start_connection()
     stderr_buffered = false,
     pty = true,
     on_stdout = function(_, data)
+		vim.print(data)
       for _, line in ipairs(data) do
         if transmit_phase == "init" and line:match("Enter SSH hostname") then
           vim.fn.chansend(transmit_job, config.credentials.host .. "\n")
