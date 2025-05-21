@@ -186,36 +186,25 @@ local function process_next_queue_item()
 end
 
 function sftp.add_to_queue(type, filename, working_dir)
-	local start_queue = false;
+	    local start_queue = false
 
-    if sftp.has_active_queue() == false then
-        sftp.start_connection()
-		start_queue = true
+    if sftp.has_active_queue() == false and type ~= "connect" then
+        local connect_processes = sftp.generate_connect_proceses(working_dir)
+        sftp.add_to_queue("connect", "", "", connect_processes)
+
+        start_queue = true
     end
 
     table.insert(queue, {
         type = type,
         filename = filename,
         working_dir = working_dir,
+        processes = processes
     })
 
-	if start_queue then
-		while next(queue) do
-			vim.print('running queue items');
-			process_next_queue_item();
-		end
-	end
-end
-
-function sftp.start_connection()
-    local config = sftp.get_sftp_server_config()
-
-    local host = config.credentials.host
-    local username = config.credentials.username
-    local identity_file = config.credentials.identity_file
-
-	sftp_lib.init_sftp_session(host, username, identity_file, sftp_session, session, sock)
-
+    if start_queue then
+        sftp.start_connection()
+    end
 end
 
 function sftp.working_dir_has_active_sftp_selection(working_dir)
@@ -226,6 +215,43 @@ function sftp.working_dir_has_active_sftp_selection(working_dir)
     end
 
     return true
+end
+
+
+function sftp.start_connection()
+    local config = sftp.get_sftp_server_config()
+
+    local host = config.credentials.host
+    local username = config.credentials.username
+    local identity_file = config.credentials.identity_file
+
+    local uv = vim.loop
+
+    local stdin = uv.new_pipe(false)
+    local stdout = uv.new_pipe(false)
+    local stderr = uv.new_pipe(false)
+
+	sftp_lib.init_sftp_session(host, username, identity_file, sftp_session, session, sock)
+
+	return vim.fn.jobstart(
+		{
+		}
+	)
+
+    -- return vim.fn.jobstart(
+    --     {
+    --     "lftp",
+    --     "sftp://" .. username .. "@" .. host,
+    --     "-u", username .. ",",
+    --     "-e", "set sftp:connect-program \"ssh -i " .. identity_file .. "\"",
+    --     },
+    --     {
+    --         pty = true,
+    --         on_stdout = on_sftp_event,
+    --         on_stderr = on_sftp_event,
+    --         on_exit = on_sftp_event,
+    --     }
+    -- )
 end
 
 function sftp.get_current_remote(working_dir)

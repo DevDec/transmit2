@@ -17,12 +17,6 @@
 
 #define SERVER_PORT 22
 
-enum REMOVE_RESPONSES {
-  SUCCESS,
-  MEDIUM,
-  HIGH
-};
-
 int init_sftp_session(const char *hostname, const char *username, const char *privkey_path, LIBSSH2_SFTP **sftp_session, LIBSSH2_SESSION **session, int *sock) {
     int rc;
     struct sockaddr_in sin;
@@ -93,49 +87,49 @@ bool is_directory(const char *path) {
 }
 
 // Function to upload a single file
-int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *remote_file) {
-	char path_copy[1024];
-	snprintf(path_copy, sizeof(path_copy), "%s", remote_file);
+int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *remote_file, char **err_msg) {
+    char path_copy[1024];
+    snprintf(path_copy, sizeof(path_copy), "%s", remote_file);
 
-	char local_path_copy[1024];
-	snprintf(local_path_copy, sizeof(local_path_copy), "%s", local_file);
+    char local_path_copy[1024];
+    snprintf(local_path_copy, sizeof(local_path_copy), "%s", local_file);
 
-	if (is_directory(local_path_copy)) {
-		char *dir_path = path_copy;
+    if (is_directory(local_path_copy)) {
+        char *dir_path = path_copy;
 
-		if (create_remote_directory_recursively(sftp_session, dir_path)) {
-			/* fprintf(stderr, "Failed to create remote directory recursively.\n"); */
-			return 1;
-		}
+        if (create_remote_directory_recursively(sftp_session, dir_path)) {
+            asprintf(err_msg, "Failed to create remote directory recursively: %s", dir_path);
+            return 1;
+        }
 
-		return 0;
-	}
+        return 0;
+    }
 
     char *dir_path = dirname(path_copy);
-
-	if (create_remote_directory_recursively(sftp_session, dir_path)) {
-		/* fprintf(stderr, "Failed to create remote directory recursively.\n"); */
-		return 1;
-	}
-
-    // Open remote file for writing
-    LIBSSH2_SFTP_HANDLE *sftp_handle = libssh2_sftp_open(sftp_session, remote_file,
-            LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
-            LIBSSH2_SFTP_S_IRUSR | LIBSSH2_SFTP_S_IWUSR);
-    if (!sftp_handle) {
-        /* fprintf(stderr, "Unable to open remote file\n"); */
+    if (create_remote_directory_recursively(sftp_session, dir_path)) {
+        asprintf(err_msg, "Failed to create remote directory recursively: %s", dir_path);
         return 1;
     }
 
-    // Open local file
+    LIBSSH2_SFTP_HANDLE *sftp_handle = libssh2_sftp_open(
+        sftp_session,
+        remote_file,
+        LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
+        LIBSSH2_SFTP_S_IRUSR | LIBSSH2_SFTP_S_IWUSR
+    );
+
+    if (!sftp_handle) {
+        asprintf(err_msg, "Unable to open remote file: %s", remote_file);
+        return 1;
+    }
+
     FILE *local = fopen(local_file, "rb");
     if (!local) {
-        /* perror("Failed to open local file"); */
+        asprintf(err_msg, "Failed to open local file: %s", local_file);
         libssh2_sftp_close(sftp_handle);
         return 1;
     }
 
-    // Upload loop
     char mem[1024];
     size_t nread;
     while ((nread = fread(mem, 1, sizeof(mem), local)) > 0) {
@@ -143,7 +137,7 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
         while (nread > 0) {
             ssize_t nwritten = libssh2_sftp_write(sftp_handle, ptr, nread);
             if (nwritten < 0) {
-                /* fprintf(stderr, "SFTP write error\n"); */
+                asprintf(err_msg, "SFTP write error while writing to: %s", remote_file);
                 fclose(local);
                 libssh2_sftp_close(sftp_handle);
                 return 1;
@@ -210,58 +204,57 @@ int create_remote_directory_recursively(LIBSSH2_SFTP *sftp_session, const char *
     return 0;
 }
 
+
 int sftp_remove_path_recursive(LIBSSH2_SFTP *sftp_session, const char *path, char **err_msg) {
     LIBSSH2_SFTP_ATTRIBUTES stat_attrs;
     if (libssh2_sftp_stat(sftp_session, path, &stat_attrs) != 0) {
-		unsigned long err = libssh2_sftp_last_error(sftp_session);
-		if (err == LIBSSH2_FX_NO_SUCH_FILE) {
-			return 0;
-		}
+        unsigned long err = libssh2_sftp_last_error(sftp_session);
+        if (err == LIBSSH2_FX_NO_SUCH_FILE) {
+            return 0;
+        } else {
+            asprintf(err_msg, "Failed to stat path: %s", path);
+            return -1;
+        }
     }
 
-    LIBSSH2_SFTP_HANDLE *dir;
-    char buffer[512];
-
-    // Try to unlink the path as a file
+    // Try unlinking as a file
     if (libssh2_sftp_unlink(sftp_session, path) == 0) {
         return 0;
     }
 
-    // Try opening the directory
-    dir = libssh2_sftp_opendir(sftp_session, path);
+    // Try opening as a directory
+    LIBSSH2_SFTP_HANDLE *dir = libssh2_sftp_opendir(sftp_session, path);
     if (!dir) {
-        // Try removing as an empty directory
+        // Try removing as empty directory
         if (libssh2_sftp_rmdir(sftp_session, path) == 0) {
             return 0;
         }
-
-		asprintf(err_msg, "Failed to open or remove path: %s", path);
+        asprintf(err_msg, "Failed to open or remove path: %s", path);
         return -1;
     }
 
+    char buffer[512];
+    char entry[256];
+
     while (1) {
         LIBSSH2_SFTP_ATTRIBUTES attrs;
-        char entry[256];
-        int rc = libssh2_sftp_readdir(dir, entry, sizeof(entry), &attrs);
-        if (rc <= 0) break; // No more entries
+        int rc = libssh2_sftp_readdir(dir, entry, sizeof(entry) - 1, &attrs);
+        if (rc <= 0) break;
+        entry[rc] = '\0';  // NULL-terminate
 
-        // Skip "." and ".."
         if (strcmp(entry, ".") == 0 || strcmp(entry, "..") == 0)
             continue;
 
-        // Construct full path
         snprintf(buffer, sizeof(buffer), "%s/%s", path, entry);
 
         if (LIBSSH2_SFTP_S_ISDIR(attrs.permissions)) {
-            // Recursive call for subdirectory
             if (sftp_remove_path_recursive(sftp_session, buffer, err_msg) != 0) {
                 libssh2_sftp_closedir(dir);
                 return -1;
             }
         } else {
-            // Delete file
             if (libssh2_sftp_unlink(sftp_session, buffer) != 0) {
-				asprintf(err_msg, "Failed to delete file: %s", buffer);
+                asprintf(err_msg, "Failed to delete file: %s", buffer);
                 libssh2_sftp_closedir(dir);
                 return -1;
             }
@@ -270,9 +263,9 @@ int sftp_remove_path_recursive(LIBSSH2_SFTP *sftp_session, const char *path, cha
 
     libssh2_sftp_closedir(dir);
 
-    // Now remove the parent directory
+    // Finally remove the now-empty directory
     if (libssh2_sftp_rmdir(sftp_session, path) != 0) {
-		asprintf(err_msg, "Failed to remove directory: %s", path);
+        asprintf(err_msg, "Failed to remove directory: %s", path);
         return -1;
     }
 
