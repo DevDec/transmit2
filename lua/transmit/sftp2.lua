@@ -54,7 +54,7 @@ local function reset_keepalive_timer()
 
   keepalive_timer = uv.new_timer()
   -- keepalive_timer:start(5 * 60 * 1000, 0, function()
-  keepalive_timer:start(5000, 0, function()
+  keepalive_timer:start(60000, 0, function()
     vim.schedule(function()
       if transmit_job then
         vim.fn.chansend(transmit_job, "exit\n")
