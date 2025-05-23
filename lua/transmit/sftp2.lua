@@ -1,4 +1,3 @@
-
 -- Updated SFTP module with connection lock and 5-minute keepalive
 local data_path = vim.fn.stdpath("data")
 local Path = require("plenary.path")
@@ -258,4 +257,3 @@ function sftp.get_progress()
 end
 
 return sftp
-

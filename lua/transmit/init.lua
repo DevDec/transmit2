@@ -225,4 +225,8 @@ function transmit.remove_watch(directory)
 	end
 end
 
+function transmit.get_progress()
+  return sftp.get_progress()
+end
+
 return transmit;
