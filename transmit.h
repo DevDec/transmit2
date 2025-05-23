@@ -10,6 +10,6 @@ void close_sftp_session(LIBSSH2_SFTP *sftp_session, LIBSSH2_SESSION *session, in
 int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *remote_file, char **err_msg);
 int sftp_remove_path_recursive(LIBSSH2_SFTP *sftp_session, const char *path, char **err_msg);
 /* int is_session_alive(LIBSSH2_SESSION *session); */
-int is_socket_closed(int sock)
+int is_socket_closed(int sock);
 
 #endif

@@ -15,7 +15,7 @@
 #include <sys/stat.h>
 #include <libgen.h>
 #include <sys/select.h>  // For select()
-
+#include <errno.h>
 
 #define SERVER_PORT 22
 
