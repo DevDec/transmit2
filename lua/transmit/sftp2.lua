@@ -314,6 +314,8 @@
 --
 --
 -- Updated SFTP module with connection lock and 5-minute keepalive
+
+-- Updated SFTP module with connection lock and 5-minute keepalive
 local data_path = vim.fn.stdpath("data")
 local Path = require("plenary.path")
 local uv = vim.loop
@@ -381,7 +383,7 @@ local function reset_keepalive_timer()
     keepalive_timer:close()
   end
   keepalive_timer = uv.new_timer()
-  keepalive_timer:start(60000, 0, function() -- 5 seconds for testing
+  keepalive_timer:start(5 * 1000, 0, function() -- 5 seconds for testing
     vim.schedule(function()
       if transmit_job then
         vim.fn.chansend(transmit_job, "exit\n")
@@ -390,6 +392,7 @@ local function reset_keepalive_timer()
         auth_step = 0
         connecting = false
         connection_ready = false
+        vim.notify("SFTP connection closed after 5 seconds of inactivity", vim.log.levels.INFO)
       end
       if keepalive_timer then
         keepalive_timer:stop()
@@ -401,7 +404,7 @@ local function reset_keepalive_timer()
 end
 
 function sftp.ensure_connection(callback)
-  if transmit_job then
+  if transmit_job and connection_ready then
     if callback then callback() end
     reset_keepalive_timer()
     return
@@ -467,7 +470,7 @@ end
 function sftp.process_next()
   local item = get_current_queue_item()
   if not item then
-	  return
+    return
   end
 
   local config = sftp.get_sftp_server_config()
@@ -492,22 +495,15 @@ function sftp.process_next()
 end
 
 function sftp.add_to_queue(type, filename, working_dir)
-	vim.notify('Adding item to queue')
-  local start_queue = false
-  if next(queue) == nil and type ~= "connect" then
-    start_queue = true
-  end
-
   table.insert(queue, {
     type = type,
     filename = filename,
     working_dir = working_dir,
   })
 
-  if start_queue then
-	vim.print('starting queue')
-    sftp.ensure_connection()
-  end
+  sftp.ensure_connection(function()
+    sftp.process_next()
+  end)
 end
 
 function sftp.get_current_remote(working_dir)
@@ -551,3 +547,4 @@ function sftp.working_dir_has_active_sftp_selection(working_dir)
 end
 
 return sftp
+
