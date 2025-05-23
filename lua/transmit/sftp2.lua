@@ -460,10 +460,23 @@ function sftp.ensure_connection(callback)
           if line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
             reset_keepalive_timer()
             sftp.process_next()
+			remove_item_from_queue()
           end
         end
       end
     end,
+
+	-- ✅ Add this block to detect disconnect
+	on_exit = function(_, exit_code, _)
+		connection_ready = false
+		transmit_job = nil
+		connecting = false
+		vim.notify("SFTP connection lost (exit code " .. exit_code .. "). Reconnecting...", vim.log.levels.WARN)
+		sftp.ensure_connection(function()
+			sftp.process_next()
+		end)	
+	end,
+})
   })
 end
 
@@ -491,7 +504,6 @@ function sftp.process_next()
   if cmd then
     vim.fn.chansend(transmit_job, cmd)
   end
-  remove_item_from_queue()
 end
 
 function sftp.add_to_queue(type, filename, working_dir)
