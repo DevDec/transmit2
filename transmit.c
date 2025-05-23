@@ -142,7 +142,6 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
     snprintf(local_path_copy, sizeof(local_path_copy), "%s", local_file);
 
     if (is_directory(local_path_copy)) {
-        // Upload directories not supported in this function
         asprintf(err_msg, "Uploading directories is not supported: %s", local_path_copy);
         return 1;
     }
@@ -154,7 +153,6 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
         return 1;
     }
 
-    // Open remote file with write, create, truncate flags to overwrite if exists
     LIBSSH2_SFTP_HANDLE *sftp_handle = libssh2_sftp_open(
         sftp_session,
         remote_file,
@@ -175,8 +173,15 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
         return 1;
     }
 
+    // Get file size for progress
+    fseek(local, 0, SEEK_END);
+    long total_size = ftell(local);
+    fseek(local, 0, SEEK_SET);
+
+    long bytes_uploaded = 0;
     char mem[1024];
     size_t nread;
+
     while ((nread = fread(mem, 1, sizeof(mem), local)) > 0) {
         char *ptr = mem;
         size_t remaining = nread;
@@ -189,8 +194,15 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
                 libssh2_sftp_close(sftp_handle);
                 return 1;
             }
+
             ptr += nwritten;
             remaining -= nwritten;
+            bytes_uploaded += nwritten;
+
+            // ✅ Emit progress
+            int percent = (int)(((double)bytes_uploaded / total_size) * 100);
+            printf("PROGRESS|%s|%d\n", remote_file, percent);
+            fflush(stdout);
         }
     }
 
@@ -198,10 +210,12 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
     libssh2_sftp_close(sftp_handle);
 
     if (err_msg) {
-        *err_msg = NULL;  // Clear error on success
+        *err_msg = NULL;
     }
+
     return 0;
 }
+
 
 
 int create_directory(LIBSSH2_SFTP *sftp_session, const char *directory) {
