@@ -383,7 +383,7 @@ local function reset_keepalive_timer()
     keepalive_timer:close()
   end
   keepalive_timer = uv.new_timer()
-  keepalive_timer:start(5 * 1000, 0, function() -- 5 seconds for testing
+  keepalive_timer:start(60000, 0, function() -- 5 seconds for testing
     vim.schedule(function()
       if transmit_job then
         vim.fn.chansend(transmit_job, "exit\n")
