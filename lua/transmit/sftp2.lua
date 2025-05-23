@@ -154,6 +154,7 @@ function sftp.ensure_connection(callback)
 					current_progress.percent = percent
 				end
 			elseif line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
+				current_progress = {}
 				reset_keepalive_timer()
 				sftp.process_next()
 				remove_item_from_queue()
@@ -166,6 +167,7 @@ function sftp.ensure_connection(callback)
 		connection_ready = false
 		transmit_job = nil
 		connecting = false
+		current_progress = {}
 		vim.notify("SFTP connection lost (exit code " .. exit_code .. "). Reconnecting...", vim.log.levels.WARN)
 		sftp.ensure_connection(function()
 			sftp.process_next()
