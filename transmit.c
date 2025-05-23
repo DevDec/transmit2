@@ -71,23 +71,11 @@ int init_sftp_session(const char *hostname, const char *username, const char *pr
 }
 
 int is_session_alive(int sock, LIBSSH2_SESSION *session) {
-    fd_set fds;
-    struct timeval timeout = {0};
-    FD_ZERO(&fds);
-    FD_SET(sock, &fds);
+	int rc;
+	int seconds_to_next = 0;
 
-    int dir = libssh2_session_block_directions(session);
-    int rc = 0;
-
-    if (dir & LIBSSH2_SESSION_BLOCK_INBOUND) {
-        rc = select(sock + 1, &fds, NULL, NULL, &timeout);
-    } else if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND) {
-        rc = select(sock + 1, NULL, &fds, NULL, &timeout);
-    } else {
-        rc = select(sock + 1, &fds, &fds, NULL, &timeout);
-    }
-
-    return rc != 0; // 0 means socket is closed/unavailable
+	rc = libssh2_keepalive_send(session, &seconds_to_next);
+	return rc == 0; // 0 means alive, non-zero means failure
 }
 
 // Function to close the SFTP connection
