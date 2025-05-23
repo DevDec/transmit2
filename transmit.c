@@ -201,7 +201,7 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
 
             // ✅ Emit progress
             int percent = (int)(((double)bytes_uploaded / total_size) * 100);
-            printf("PROGRESS|%s|%d\n", remote_file, percent);
+            printf("PROGRESS|%s|%d\n", local_file, percent);
             fflush(stdout);
         }
     }
