@@ -73,13 +73,26 @@ int init_sftp_session(const char *hostname, const char *username, const char *pr
 int is_socket_closed(int sock) {
     char buf;
     int rc = recv(sock, &buf, 1, MSG_PEEK);
+
     if (rc == 0) {
-        // Connection has been closed
+        // Connection has been closed by peer
         return 1;
-    } else if (rc < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-        // Some error other than non-blocking/no data
+    } else if (rc < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+            // No data available yet (non-blocking mode), not an error
+            return 0;
+        }
+        // Other errors (e.g., ECONNRESET)
         return 1;
     }
+
+    // Data available or socket open
+    return 0;
+}
+
+void set_blocking(int sock) {
+    int flags = fcntl(sock, F_GETFL, 0);
+    fcntl(sock, F_SETFL, flags & ~O_NONBLOCK);
 }
 
 /* int is_session_alive(LIBSSH2_SESSION *session) { */
