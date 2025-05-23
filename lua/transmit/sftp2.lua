@@ -139,6 +139,16 @@ function sftp.start_connection()
 		-- Open the log file in append mode
 		local log_file_path = vim.fn.stdpath("cache") .. "/sftp_log.txt"
 		local log_file = io.open(log_file_path, "a")
+
+		local stat = vim.loop.fs_stat(log_file_path)
+		if stat and stat.size > 50 * 1024 * 1024 then -- 50MB
+			local clear_file = io.open(log_file_path, "w") -- truncate file
+			if clear_file then
+				clear_file:close()
+				vim.notify("Transmit Log file exceeded 50MB. It has been cleared.", vim.log.levels.WARN)
+			end
+		end
+
 		local timestamp_format = "[%Y-%m-%d %H:%M:%S] " -- e.g. [2025-05-23 14:33:45] 
 
 		for _, line in ipairs(data) do
