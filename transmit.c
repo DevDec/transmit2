@@ -70,13 +70,25 @@ int init_sftp_session(const char *hostname, const char *username, const char *pr
     return 0;
 }
 
-int is_session_alive(LIBSSH2_SESSION *session) {
-	int rc;
-	int seconds_to_next = 0;
-
-	rc = libssh2_keepalive_send(session, &seconds_to_next);
-	return rc == 0; // 0 means alive, non-zero means failure
+int is_socket_closed(int sock) {
+    char buf;
+    int rc = recv(sock, &buf, 1, MSG_PEEK);
+    if (rc == 0) {
+        // Connection has been closed
+        return 1;
+    } else if (rc < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+        // Some error other than non-blocking/no data
+        return 1;
+    }
 }
+
+/* int is_session_alive(LIBSSH2_SESSION *session) { */
+/* 	int rc; */
+/* 	int seconds_to_next = 0; */
+/**/
+/* 	rc = libssh2_keepalive_send(session, &seconds_to_next); */
+/* 	return rc == 0; // 0 means alive, non-zero means failure */
+/* } */
 
 // Function to close the SFTP connection
 void close_sftp_session(LIBSSH2_SFTP *sftp_session, LIBSSH2_SESSION *session, int sock) {
