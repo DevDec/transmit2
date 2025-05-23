@@ -466,7 +466,6 @@ function sftp.ensure_connection(callback)
       end
     end,
 
-	-- ✅ Add this block to detect disconnect
 	on_exit = function(_, exit_code, _)
 		connection_ready = false
 		transmit_job = nil
@@ -476,7 +475,6 @@ function sftp.ensure_connection(callback)
 			sftp.process_next()
 		end)	
 	end,
-})
   })
 end
 
