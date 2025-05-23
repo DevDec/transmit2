@@ -153,21 +153,25 @@ function sftp.start_connection()
 
 		for _, line in ipairs(data) do
 			local timestamp = os.date(timestamp_format)
-			log_file:write(timestamp .. line .. "\n")
 
 			if transmit_phase == "init" and line:match("Enter SSH hostname") then
+				log_file:write(timestamp .. line .. "\n")
 				vim.fn.chansend(transmit_job, config.credentials.host .. "\n")
 				transmit_phase = "username"
 			elseif transmit_phase == "username" and line:match("Enter SSH username") then
+				log_file:write(timestamp .. line .. "\n")
 				vim.fn.chansend(transmit_job, config.credentials.username .. "\n")
 				transmit_phase = "key"
 			elseif transmit_phase == "key" and line:match("Enter path to private key") then
+				log_file:write(timestamp .. line .. "\n")
 				vim.fn.chansend(transmit_job, config.credentials.identity_file .. "\n")
 				transmit_phase = "ready"
 			elseif transmit_phase == "ready" and line:match("Connected to") then
+				log_file:write(timestamp .. line .. "\n")
 				transmit_phase = "active"
 				sftp.process_next()
 			elseif transmit_phase == "active" then
+				log_file:write(timestamp .. line .. "\n")
 				if line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
 					sftp.process_next()
 				end
