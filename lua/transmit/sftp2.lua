@@ -492,6 +492,7 @@ function sftp.process_next()
 end
 
 function sftp.add_to_queue(type, filename, working_dir)
+	vim.notify('Adding item to queue')
   local start_queue = false
   if next(queue) == nil and type ~= "connect" then
     start_queue = true
