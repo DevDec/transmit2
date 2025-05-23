@@ -47,7 +47,7 @@ int main() {
     printf("1|Connected to %s as %s\n", hostname, username);
 
     while (1) {
-		if (!is_session_alive(session)) {
+		if (is_session_alive(session)) {
 			printf("0|SFTP session lost. Disconnecting.\n");
 			break;
 		}
