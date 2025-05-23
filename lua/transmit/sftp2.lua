@@ -139,12 +139,21 @@ function sftp.ensure_connection(callback)
           connection_ready = true
           if callback then callback() end
           sftp.process_next()
+
         elseif transmit_phase == "active" then
-          if line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
-            reset_keepalive_timer()
-            sftp.process_next()
-			remove_item_from_queue()
-          end
+			if line:match("^PROGRESS|") then
+				local file, percent = line:match("^PROGRESS|(.-)|(%d+)")
+				percent = tonumber(percent)
+				if file and percent then
+					vim.schedule(function()
+						vim.api.nvim_echo({ { string.format("Uploading: %s [%d%%]", Path:new(file):make_relative(), percent), "None" } }, false, {})
+					end)
+				end
+			elseif line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
+				reset_keepalive_timer()
+				sftp.process_next()
+				remove_item_from_queue()
+			end
         end
       end
     end,
