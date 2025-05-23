@@ -1,3 +1,4 @@
+
 -- Updated SFTP module with connection lock and 5-minute keepalive
 local data_path = vim.fn.stdpath("data")
 local Path = require("plenary.path")
@@ -11,6 +12,11 @@ local auth_step = 0
 local keepalive_timer = nil
 local connecting = false
 local connection_ready = false
+
+local current_progress = {
+  file = nil,
+  percent = nil,
+}
 
 sftp.server_config = {}
 
@@ -145,9 +151,8 @@ function sftp.ensure_connection(callback)
 				local file, percent = line:match("^PROGRESS|(.-)|(%d+)")
 				percent = tonumber(percent)
 				if file and percent then
-					vim.schedule(function()
-						vim.api.nvim_echo({ { string.format("Uploading: %s [%d%%]", Path:new(file):make_relative(), percent), "None" } }, false, {})
-					end)
+					current_progress.file = Path:new(file):make_relative()
+					current_progress.percent = percent
 				end
 			elseif line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
 				reset_keepalive_timer()
@@ -246,6 +251,10 @@ end
 function sftp.working_dir_has_active_sftp_selection(working_dir)
   local data = get_transmit_data()
   return data[working_dir] and data[working_dir].remote
+end
+
+function sftp.get_progress()
+  return current_progress
 end
 
 return sftp
