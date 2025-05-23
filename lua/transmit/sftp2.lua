@@ -1,3 +1,6 @@
+local uv = vim.loop
+local keepalive_timer = nil
+
 local data_path = vim.fn.stdpath("data")
 local Path = require("plenary.path")
 
@@ -39,6 +42,30 @@ local function remove_item_from_queue()
     queue[k] = nil
     break
   end
+end
+
+local function reset_keepalive_timer()
+  if keepalive_timer then
+    keepalive_timer:stop()
+    keepalive_timer:close()
+  end
+
+  keepalive_timer = uv.new_timer()
+  keepalive_timer:start(5 * 60 * 1000, 0, function()
+    vim.schedule(function()
+      if transmit_job then
+        vim.fn.chansend(transmit_job, "exit\n")
+        transmit_job = nil
+        transmit_phase = "init"
+        auth_step = 0
+      end
+      if keepalive_timer then
+        keepalive_timer:stop()
+        keepalive_timer:close()
+        keepalive_timer = nil
+      end
+    end)
+  end)
 end
 
 local function escapePattern(str)
@@ -124,6 +151,11 @@ function sftp.process_next()
 end
 
 function sftp.start_connection()
+	if transmit_job then
+		reset_keepalive_timer()
+		return
+	end
+
   local config = sftp.get_sftp_server_config()
   if not config then return end
 
@@ -173,6 +205,7 @@ function sftp.start_connection()
 			elseif transmit_phase == "active" then
 				log_file:write(timestamp .. line .. "\n")
 				if line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
+					reset_keepalive_timer()
 					sftp.process_next()
 				end
 			end
