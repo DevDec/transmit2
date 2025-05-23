@@ -136,8 +136,13 @@ function sftp.start_connection()
     stderr_buffered = false,
     pty = true,
     on_stdout = function(_, data)
+		-- Open the log file in append mode
+		local log_file_path = vim.fn.stdpath("cache") .. "/sftp_log.txt"
+		vim.print(log_file_path)
+		local log_file = io.open(log_file_path, "a")
 		vim.print(data)
       for _, line in ipairs(data) do
+		  log_file:write(line .. "\n")
         if transmit_phase == "init" and line:match("Enter SSH hostname") then
           vim.fn.chansend(transmit_job, config.credentials.host .. "\n")
           transmit_phase = "username"
