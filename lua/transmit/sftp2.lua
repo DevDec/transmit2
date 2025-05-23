@@ -11,6 +11,7 @@ local transmit_phase = "init"
 local auth_step = 0
 
 local connecting = false
+local connection_ready = false
 
 sftp.server_config = {}
 
@@ -148,72 +149,138 @@ function sftp.process_next()
   remove_item_from_queue()
 end
 
-function sftp.start_connection()
-	if transmit_job or connecting then
+function sftp.ensure_connection(callback)
+	if transmit_job then
+		if callback then callback() end
 		reset_keepalive_timer()
 		return
 	end
+	if connecting then return end
 
-  connecting = true
-  local config = sftp.get_sftp_server_config()
-  if not config then return end
+	connecting = true
 
-  local transmit_executable = get_transmit_path()
+	local config = sftp.get_sftp_server_config()
+	if not config then
+		connecting = false
+		return
+	end
 
-  transmit_phase = "init"
+	local transmit_executable = get_transmit_path()
 
-  transmit_job = vim.fn.jobstart({ transmit_executable }, {
-    stdout_buffered = false,
-    stderr_buffered = false,
-    pty = true,
-    on_stdout = function(_, data)
-		-- Open the log file in append mode
-		local log_file_path = vim.fn.stdpath("cache") .. "/sftp_log.txt"
-		local log_file = io.open(log_file_path, "a")
+	transmit_phase = "init"
 
-		local stat = vim.loop.fs_stat(log_file_path)
-		if stat and stat.size > 50 * 1024 * 1024 then -- 50MB
-			local clear_file = io.open(log_file_path, "w") -- truncate file
-			if clear_file then
-				clear_file:close()
-				vim.notify("Transmit Log file exceeded 50MB. It has been cleared.", vim.log.levels.WARN)
-			end
-		end
-
-		local timestamp_format = "[%Y-%m-%d %H:%M:%S] " -- e.g. [2025-05-23 14:33:45] 
-
-		for _, line in ipairs(data) do
-			local timestamp = os.date(timestamp_format)
-
-			if transmit_phase == "init" and line:match("Enter SSH hostname") then
-				log_file:write(timestamp .. line .. "\n")
-				vim.fn.chansend(transmit_job, config.credentials.host .. "\n")
-				transmit_phase = "username"
-			elseif transmit_phase == "username" and line:match("Enter SSH username") then
-				log_file:write(timestamp .. line .. "\n")
-				vim.fn.chansend(transmit_job, config.credentials.username .. "\n")
-				transmit_phase = "key"
-			elseif transmit_phase == "key" and line:match("Enter path to private key") then
-				log_file:write(timestamp .. line .. "\n")
-				vim.fn.chansend(transmit_job, config.credentials.identity_file .. "\n")
-				transmit_phase = "ready"
-			elseif transmit_phase == "ready" and line:match("Connected to") then
-				log_file:write(timestamp .. line .. "\n")
-				transmit_phase = "active"
-				connecting = false
-
-				sftp.process_next()
-			elseif transmit_phase == "active" then
-				log_file:write(timestamp .. line .. "\n")
-				if line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
-					reset_keepalive_timer()
-					sftp.process_next()
+	transmit_job = vim.fn.jobstart({ transmit_executable }, {
+		stdout_buffered = false,
+		stderr_buffered = false,
+		pty = true,
+		on_stdout = function(_, data)
+			local log_file_path = vim.fn.stdpath("cache") .. "/sftp_log.txt"
+			local log_file = io.open(log_file_path, "a")
+			local stat = vim.loop.fs_stat(log_file_path)
+			if stat and stat.size > 50 * 1024 * 1024 then
+				local clear_file = io.open(log_file_path, "w")
+				if clear_file then
+					clear_file:close()
+					vim.notify("Transmit Log file exceeded 50MB. It has been cleared.", vim.log.levels.WARN)
 				end
 			end
-		end
-    end,
-  })
+			local timestamp_format = "[%Y-%m-%d %H:%M:%S] "
+			for _, line in ipairs(data) do
+				local timestamp = os.date(timestamp_format)
+				log_file:write(timestamp .. line .. "\n")
+
+				if transmit_phase == "init" and line:match("Enter SSH hostname") then
+					vim.fn.chansend(transmit_job, config.credentials.host .. "\n")
+					transmit_phase = "username"
+				elseif transmit_phase == "username" and line:match("Enter SSH username") then
+					vim.fn.chansend(transmit_job, config.credentials.username .. "\n")
+					transmit_phase = "key"
+				elseif transmit_phase == "key" and line:match("Enter path to private key") then
+					vim.fn.chansend(transmit_job, config.credentials.identity_file .. "\n")
+					transmit_phase = "ready"
+				elseif transmit_phase == "ready" and line:match("Connected to") then
+					transmit_phase = "active"
+					connecting = false
+					connection_ready = true
+					if callback then callback() end
+					sftp.process_next()
+				elseif transmit_phase == "active" then
+					if line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
+						reset_keepalive_timer()
+						sftp.process_next()
+					end
+				end
+			end
+		end,
+	})
 end
+
+-- function sftp.start_connection()
+-- 	if transmit_job or connecting then
+-- 		reset_keepalive_timer()
+-- 		return
+-- 	end
+--
+--   connecting = true
+--   local config = sftp.get_sftp_server_config()
+--   if not config then return end
+--
+--   local transmit_executable = get_transmit_path()
+--
+--   transmit_phase = "init"
+--
+--   transmit_job = vim.fn.jobstart({ transmit_executable }, {
+--     stdout_buffered = false,
+--     stderr_buffered = false,
+--     pty = true,
+--     on_stdout = function(_, data)
+-- 		-- Open the log file in append mode
+-- 		local log_file_path = vim.fn.stdpath("cache") .. "/sftp_log.txt"
+-- 		local log_file = io.open(log_file_path, "a")
+--
+-- 		local stat = vim.loop.fs_stat(log_file_path)
+-- 		if stat and stat.size > 50 * 1024 * 1024 then -- 50MB
+-- 			local clear_file = io.open(log_file_path, "w") -- truncate file
+-- 			if clear_file then
+-- 				clear_file:close()
+-- 				vim.notify("Transmit Log file exceeded 50MB. It has been cleared.", vim.log.levels.WARN)
+-- 			end
+-- 		end
+--
+-- 		local timestamp_format = "[%Y-%m-%d %H:%M:%S] " -- e.g. [2025-05-23 14:33:45] 
+--
+-- 		for _, line in ipairs(data) do
+-- 			local timestamp = os.date(timestamp_format)
+--
+-- 			if transmit_phase == "init" and line:match("Enter SSH hostname") then
+-- 				log_file:write(timestamp .. line .. "\n")
+-- 				vim.fn.chansend(transmit_job, config.credentials.host .. "\n")
+-- 				transmit_phase = "username"
+-- 			elseif transmit_phase == "username" and line:match("Enter SSH username") then
+-- 				log_file:write(timestamp .. line .. "\n")
+-- 				vim.fn.chansend(transmit_job, config.credentials.username .. "\n")
+-- 				transmit_phase = "key"
+-- 			elseif transmit_phase == "key" and line:match("Enter path to private key") then
+-- 				log_file:write(timestamp .. line .. "\n")
+-- 				vim.fn.chansend(transmit_job, config.credentials.identity_file .. "\n")
+-- 				transmit_phase = "ready"
+-- 			elseif transmit_phase == "ready" and line:match("Connected to") then
+-- 				log_file:write(timestamp .. line .. "\n")
+-- 				transmit_phase = "active"
+-- 				connecting = false
+--
+-- 				sftp.process_next()
+-- 			elseif transmit_phase == "active" then
+-- 				log_file:write(timestamp .. line .. "\n")
+-- 				if line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
+-- 					reset_keepalive_timer()
+-- 					sftp.process_next()
+-- 				end
+-- 			end
+-- 		end
+--     end,
+--   })
+-- end
 
 function sftp.add_to_queue(type, filename, working_dir)
   local start_queue = false
@@ -228,8 +295,8 @@ function sftp.add_to_queue(type, filename, working_dir)
   })
 
   if start_queue then
-	  vim.print('starting connection')
-    sftp.start_connection()
+	  sftp.ensure_connection()
+	  -- sftp.start_connection()
   end
 end
 
