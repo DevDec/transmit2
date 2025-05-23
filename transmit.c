@@ -70,7 +70,7 @@ int init_sftp_session(const char *hostname, const char *username, const char *pr
     return 0;
 }
 
-int is_session_alive(int sock, LIBSSH2_SESSION *session) {
+int is_session_alive(LIBSSH2_SESSION *session) {
 	int rc;
 	int seconds_to_next = 0;
 
