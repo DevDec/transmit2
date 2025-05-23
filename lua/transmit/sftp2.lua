@@ -120,12 +120,6 @@ end
 function sftp.process_next()
   local item = get_current_queue_item()
   if not item then
-    if transmit_job then
-      vim.fn.chansend(transmit_job, "exit\n")
-      transmit_job = nil
-      transmit_phase = "init"
-      auth_step = 0
-    end
     return
   end
 
