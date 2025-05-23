@@ -229,4 +229,8 @@ function transmit.get_progress()
   return sftp.get_progress()
 end
 
+function transmit.queue_length()
+	return sftp.queue_length()
+end
+
 return transmit;

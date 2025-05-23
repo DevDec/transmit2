@@ -258,4 +258,12 @@ function sftp.get_progress()
   return current_progress
 end
 
+function sftp.queue_length()
+  local count = 0
+  for _ in pairs(queue) do
+    count = count + 1
+  end
+  return count
+end
+
 return sftp
