@@ -47,6 +47,12 @@ int main() {
     printf("1|Connected to %s as %s\n", hostname, username);
 
     while (1) {
+		if (!is_session_alive(sock, session)) {
+			printf("0|SFTP session lost. Disconnecting.\n");
+			break;
+		}
+
+
         printf("Command (upload <local> <remote> | remove <remote> | exit): ");
         fflush(stdout);
 
