@@ -47,8 +47,8 @@ int main() {
     printf("1|Connected to %s as %s\n", hostname, username);
 
     while (1) {
-		if (is_socket_closed(sock)) {
-			printf("0|SFTP session lost (socket closed by server)\n");
+		if (!is_sftp_session_alive(sftp_session, session)) {
+			printf("0|SFTP session lost\n");
 			break;
 		}
 

@@ -90,11 +90,23 @@ int is_socket_closed(int sock) {
     return 0;
 }
 
-void set_blocking(int sock) {
-    int flags = fcntl(sock, F_GETFL, 0);
-    fcntl(sock, F_SETFL, flags & ~O_NONBLOCK);
-}
+int is_sftp_session_alive(LIBSSH2_SFTP *sftp_session, LIBSSH2_SESSION *session) {
+    LIBSSH2_SFTP_ATTRIBUTES attrs;
+    int rc = libssh2_sftp_stat_ex(sftp_session, "/", 1, LIBSSH2_SFTP_STAT, &attrs);
+    if (rc == 0) {
+        return 1; // Session is alive
+    }
 
+    int err = libssh2_session_last_error(session, NULL, NULL, 0);
+    if (err == LIBSSH2_ERROR_SOCKET_DISCONNECT ||
+        err == LIBSSH2_ERROR_CHANNEL_CLOSED ||
+        err == LIBSSH2_ERROR_SOCKET_SEND ||
+        err == LIBSSH2_ERROR_SOCKET_TIMEOUT) {
+        return 0; // Definitely disconnected
+    }
+
+    return 1; // Might just be a missing file or permission error
+}
 /* int is_session_alive(LIBSSH2_SESSION *session) { */
 /* 	int rc; */
 /* 	int seconds_to_next = 0; */
