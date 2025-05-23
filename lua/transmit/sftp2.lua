@@ -505,6 +505,7 @@ function sftp.add_to_queue(type, filename, working_dir)
   })
 
   if start_queue then
+	vim.print('starting queue')
     sftp.ensure_connection()
   end
 end
