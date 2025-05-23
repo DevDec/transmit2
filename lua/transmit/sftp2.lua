@@ -10,6 +10,8 @@ local transmit_job = nil
 local transmit_phase = "init"
 local auth_step = 0
 
+local connecting = false
+
 sftp.server_config = {}
 
 local transmit_server_data = string.format("%s/transmit.json", data_path)
@@ -51,13 +53,15 @@ local function reset_keepalive_timer()
   end
 
   keepalive_timer = uv.new_timer()
-  keepalive_timer:start(5 * 60 * 1000, 0, function()
+  -- keepalive_timer:start(5 * 60 * 1000, 0, function()
+  keepalive_timer:start(5000, 0, function()
     vim.schedule(function()
       if transmit_job then
         vim.fn.chansend(transmit_job, "exit\n")
         transmit_job = nil
         transmit_phase = "init"
         auth_step = 0
+		connecting = false
       end
       if keepalive_timer then
         keepalive_timer:stop()
@@ -145,11 +149,12 @@ function sftp.process_next()
 end
 
 function sftp.start_connection()
-	if transmit_job then
+	if transmit_job or connecting then
 		reset_keepalive_timer()
 		return
 	end
 
+  connecting = true
   local config = sftp.get_sftp_server_config()
   if not config then return end
 
@@ -195,6 +200,8 @@ function sftp.start_connection()
 			elseif transmit_phase == "ready" and line:match("Connected to") then
 				log_file:write(timestamp .. line .. "\n")
 				transmit_phase = "active"
+				connecting = false
+
 				sftp.process_next()
 			elseif transmit_phase == "active" then
 				log_file:write(timestamp .. line .. "\n")
@@ -221,6 +228,7 @@ function sftp.add_to_queue(type, filename, working_dir)
   })
 
   if start_queue then
+	  vim.print('starting connection')
     sftp.start_connection()
   end
 end
