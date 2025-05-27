@@ -125,8 +125,8 @@ function sftp.ensure_connection(callback)
         end
       end
       local timestamp_format = "[%Y-%m-%d %H:%M:%S] "
-	  vim.notify(data)
-	  vim.notify(queue)
+	  vim.inspect(data)
+	  vim.inspect(queue)
 
       for _, line in ipairs(data) do
         local timestamp = os.date(timestamp_format)
