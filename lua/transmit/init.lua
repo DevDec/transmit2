@@ -71,7 +71,7 @@ function transmit.setup(config)
 	end
 
     if server_config.watch_for_changes ~= nil and server_config.watch_for_changes == true then
-		transmit.watch_current_working_directory()
+		-- transmit.watch_current_working_directory()
     elseif server_config.upload_on_bufwrite ~= nil then
         vim.cmd([[
             augroup TransmitAutoCommands
