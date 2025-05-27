@@ -125,8 +125,6 @@ function sftp.ensure_connection(callback)
         end
       end
       local timestamp_format = "[%Y-%m-%d %H:%M:%S] "
-	  vim.notify(vim.inspect(data))
-	  vim.notify(vim.inspect(queue))
 
       for _, line in ipairs(data) do
         local timestamp = os.date(timestamp_format)
@@ -210,6 +208,8 @@ function sftp.add_to_queue(type, filename, working_dir)
     filename = filename,
     working_dir = working_dir,
   })
+
+  vim.print('Adding to queue');
 
   sftp.ensure_connection(function()
     sftp.process_next()
