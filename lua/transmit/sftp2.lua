@@ -144,7 +144,6 @@ function sftp.ensure_connection(callback)
           connecting = false
           connection_ready = true
           if callback then callback() end
-          sftp.process_next()
         elseif transmit_phase == "active" then
 			if line:match("^PROGRESS|") then
 				local file, percent = line:match("^PROGRESS|(.-)|(%d+)")
