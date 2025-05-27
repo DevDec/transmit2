@@ -154,10 +154,10 @@ function sftp.ensure_connection(callback)
 					current_progress.percent = percent
 				end
 			elseif line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
+				remove_item_from_queue()
 				current_progress = {}
 				reset_keepalive_timer()
 				sftp.process_next()
-				remove_item_from_queue()
 			end
         end
       end
