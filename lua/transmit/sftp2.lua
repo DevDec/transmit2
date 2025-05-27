@@ -125,6 +125,8 @@ function sftp.ensure_connection(callback)
         end
       end
       local timestamp_format = "[%Y-%m-%d %H:%M:%S] "
+	  vim.notify(data)
+
       for _, line in ipairs(data) do
         local timestamp = os.date(timestamp_format)
         log_file:write(timestamp .. line .. "\n")
@@ -144,7 +146,6 @@ function sftp.ensure_connection(callback)
           connection_ready = true
           if callback then callback() end
           sftp.process_next()
-
         elseif transmit_phase == "active" then
 			if line:match("^PROGRESS|") then
 				local file, percent = line:match("^PROGRESS|(.-)|(%d+)")
