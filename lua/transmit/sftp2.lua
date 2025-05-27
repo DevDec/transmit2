@@ -112,7 +112,7 @@ function sftp.ensure_connection(callback)
   transmit_job = vim.fn.jobstart({ transmit_executable }, {
     stdout_buffered = false,
     stderr_buffered = false,
-    pty = true,
+    pty = false,
     on_stdout = function(_, data)
       local log_file_path = vim.fn.stdpath("cache") .. "/sftp_log.txt"
       local log_file = io.open(log_file_path, "a")
@@ -208,8 +208,6 @@ function sftp.add_to_queue(type, filename, working_dir)
     filename = filename,
     working_dir = working_dir,
   })
-
-  vim.print('Adding to queue');
 
   sftp.ensure_connection(function()
     sftp.process_next()
