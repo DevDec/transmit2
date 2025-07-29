@@ -81,9 +81,7 @@ function transmit.setup(config)
         ]])
     end
 
-	vim.print('got here')
-
-    end
+end
 
 function transmit.get_current_server()
     return sftp.get_current_server(vim.loop.cwd())
