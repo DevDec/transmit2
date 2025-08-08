@@ -40,6 +40,23 @@ local function on_change(path, directory, excluded_directories)
     local file_exists = false
 	local isDirectory = false
 
+	if path:match('%.vim%.bak$') then
+		return true
+	end
+
+	-- Exclude Neovim swap files (e.g., .filename.swp, .filename.swo)
+	-- The pattern matches a dot followed by 'sw' and a single lowercase letter at the end of the path.
+	-- This is a common pattern for hidden swap files.
+	if path:match('%.sw[a-z]$') then
+		return true
+	end
+
+	-- Exclude temporary files that might have a .tmp extension
+	if path:match('%.tmp$') then
+		return true
+	end
+
+
     if f ~= nil then
         file_exists = true
 		local stat = vim.loop.fs_stat(path)
