@@ -77,6 +77,11 @@ end
 local function get_server_list()
   local servers = {"none"}
   
+  -- Check if server_config exists and is a table
+  if not sftp.server_config or type(sftp.server_config) ~= "table" then
+    return servers
+  end
+  
   for name, _ in pairs(sftp.server_config) do
     table.insert(servers, name)
   end
@@ -88,8 +93,19 @@ end
 ---@param server_name string The server name
 ---@return string[]|nil remotes List of remote names or nil if server not found
 local function get_remote_list(server_name)
+  -- Check if server_config exists
+  if not sftp.server_config or type(sftp.server_config) ~= "table" then
+    return nil
+  end
+  
   if not sftp.server_config[server_name] then
     return nil
+  end
+  
+  -- Check if remotes exists
+  if not sftp.server_config[server_name]['remotes'] or 
+     type(sftp.server_config[server_name]['remotes']) ~= "table" then
+    return {}
   end
   
   local remotes = {}
@@ -103,9 +119,15 @@ end
 ---Open server selection window
 ---@return nil
 function transmit.open_select_window()
+  local servers = get_server_list()
+  
+  -- Check if any servers are configured beyond 'none'
+  if #servers == 1 then
+    vim.notify("No SFTP servers configured. Check your config file.", vim.log.levels.WARN)
+  end
+  
   local buf, win = create_floating_window("Transmit server selection")
   
-  local servers = get_server_list()
   set_buffer_lines(buf, servers)
   
   vim.api.nvim_buf_set_keymap(
