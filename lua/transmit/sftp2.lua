@@ -12,6 +12,31 @@ local keepalive_timer = nil
 local connecting = false
 local connection_ready = false
 
+local is_exiting = false
+
+vim.api.nvim_create_autocmd("VimLeavePre", {
+  callback = function()
+    is_exiting = true
+
+	if keepalive_timer then
+		keepalive_timer:stop()
+		keepalive_timer:close()
+		keepalive_timer = nil
+	end
+
+	if transmit_job then
+		vim.fn.jobstop(transmit_job)
+		transmit_job = nil
+	end
+
+	transmit_phase = "init"
+	auth_step = 0
+	connecting = false
+	connection_ready = false
+	queue = {}
+end
+})
+
 local current_progress = {
   file = nil,
   percent = nil,
@@ -167,10 +192,14 @@ function sftp.ensure_connection(callback)
 		transmit_job = nil
 		connecting = false
 		current_progress = {}
-		vim.notify("SFTP connection lost (exit code " .. exit_code .. "). Reconnecting...", vim.log.levels.WARN)
-		sftp.ensure_connection(function()
-			sftp.process_next()
-		end)	
+
+		-- Don't try to reconnect if we're exiting
+		if not is_exiting then
+			vim.notify("SFTP connection lost (exit code " .. exit_code .. "). Reconnecting...", vim.log.levels.WARN)
+			sftp.ensure_connection(function()
+				sftp.process_next()
+			end)
+		end
 	end,
   })
 end
