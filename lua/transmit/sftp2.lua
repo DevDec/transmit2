@@ -159,7 +159,7 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
   end
 })
 
----Get the path to the transmit executable
+---Get the path to the transmit executable based on OS
 ---@return string|nil path Path to the transmit executable or nil on error
 local function get_transmit_path()
   local info = debug.getinfo(1, "S")
@@ -176,12 +176,40 @@ local function get_transmit_path()
   
   local dir = vim.fn.fnamemodify(source, ":h")
   local parent_dir = vim.fn.fnamemodify(dir, ":h:h")
-  local transmit_path = parent_dir .. "/transmit"
+  
+  -- Determine OS and select appropriate binary
+  local binary_name
+  if vim.fn.has("mac") == 1 or vim.fn.has("macunix") == 1 then
+    binary_name = "transmit-macos"
+  elseif vim.fn.has("unix") == 1 then
+    binary_name = "transmit-linux"
+  elseif vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1 then
+    binary_name = "transmit-windows.exe"
+  else
+    log(LOG_LEVELS.ERROR, "Unsupported operating system", true)
+    return nil
+  end
+  
+  -- Look in bin/ subdirectory
+  local transmit_path = parent_dir .. "/bin/" .. binary_name
   
   -- Verify the executable exists
   if vim.fn.filereadable(transmit_path) ~= 1 then
     log(LOG_LEVELS.ERROR, "Transmit executable not found at: " .. transmit_path, true)
     return nil
+  end
+  
+  -- Verify it's executable
+  if vim.fn.executable(transmit_path) ~= 1 then
+    log(LOG_LEVELS.WARN, "Transmit binary exists but is not executable, attempting to fix: " .. transmit_path, true)
+    -- Try to make it executable
+    vim.fn.system("chmod +x " .. vim.fn.shellescape(transmit_path))
+    
+    -- Check again
+    if vim.fn.executable(transmit_path) ~= 1 then
+      log(LOG_LEVELS.ERROR, "Failed to make transmit binary executable: " .. transmit_path, true)
+      return nil
+    end
   end
   
   return transmit_path
