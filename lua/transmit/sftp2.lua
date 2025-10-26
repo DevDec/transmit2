@@ -7,7 +7,9 @@ local uv = vim.loop
 local PHASE = {
   INIT = "init",
   USERNAME = "username",
+  AUTH_METHOD = "auth_method",
   KEY = "key",
+  PASSWORD = "password",
   READY = "ready",
   ACTIVE = "active",
 }
@@ -429,13 +431,25 @@ function sftp.ensure_connection(callback)
         if state.transmit_phase == PHASE.INIT and line:match("Enter SSH hostname") then
           vim.fn.chansend(state.transmit_job, config_data.credentials.host .. "\n")
           state.transmit_phase = PHASE.USERNAME
-        elseif state.transmit_phase == PHASE.USERNAME and line:match("Enter SSH username") then
-          vim.fn.chansend(state.transmit_job, config_data.credentials.username .. "\n")
-          state.transmit_phase = PHASE.KEY
-        elseif state.transmit_phase == PHASE.KEY and line:match("Enter path to private key") then
-          vim.fn.chansend(state.transmit_job, config_data.credentials.identity_file .. "\n")
-          state.transmit_phase = PHASE.READY
-        elseif state.transmit_phase == PHASE.READY and line:match("Connected to") then
+		  -- In the on_stdout callback, after "Enter SSH username":
+	  elseif transmit_phase == PHASE.USERNAME and line:match("Enter SSH username") then
+		  vim.fn.chansend(state.transmit_job, config_data.credentials.username .. "\n")
+		  transmit_phase = PHASE.AUTH_METHOD
+	  elseif transmit_phase == PHASE.AUTH_METHOD and line:match("Authentication method") then
+		  local auth_type = config_data.credentials.auth_type or "key"
+		  vim.fn.chansend(state.transmit_job, auth_type .. "\n")
+		  if auth_type == "password" then
+			  transmit_phase = PHASE.PASSWORD
+		  else
+			  transmit_phase = PHASE.KEY
+		  end
+	  elseif transmit_phase == PHASE.PASSWORD and line:match("Enter password") then
+		  vim.fn.chansend(state.transmit_job, config_data.credentials.password .. "\n")
+		  transmit_phase = PHASE.READY
+	  elseif transmit_phase == PHASE.KEY and line:match("Enter path to private key") then
+		  vim.fn.chansend(state.transmit_job, config_data.credentials.identity_file .. "\n")
+		  transmit_phase = PHASE.READY
+	  elseif state.transmit_phase == PHASE.READY and line:match("Connected to") then
           state.transmit_phase = PHASE.ACTIVE
           state.connecting = false
           state.connection_ready = true

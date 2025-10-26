@@ -70,6 +70,50 @@ int init_sftp_session(const char *hostname, const char *username, const char *pr
     return 0;
 }
 
+int init_sftp_session_password(const char *hostname, const char *username, const char *password, LIBSSH2_SFTP **sftp_session, LIBSSH2_SESSION **session, int *sock) {
+    int rc;
+    struct sockaddr_in sin;
+
+    // Init libssh2
+    rc = libssh2_init(0);
+    if (rc != 0) {
+        return -1;
+    }
+
+    // Create socket and connect
+    *sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (*sock < 0) {
+        return -1;
+    }
+    
+    sin.sin_family = AF_INET;
+    sin.sin_port = htons(22);
+    inet_pton(AF_INET, hostname, &sin.sin_addr);
+    
+    if (connect(*sock, (struct sockaddr*)(&sin), sizeof(struct sockaddr_in)) != 0) {
+        return -1;
+    }
+
+    // Create SSH session
+    *session = libssh2_session_init();
+    if (libssh2_session_handshake(*session, *sock)) {
+        return -1;
+    }
+
+    // Authenticate with password
+    if (libssh2_userauth_password(*session, username, password)) {
+        return -1;
+    }
+
+    // Init SFTP session
+    *sftp_session = libssh2_sftp_init(*session);
+    if (!(*sftp_session)) {
+        return -1;
+    }
+
+    return 0;
+}
+
 int is_socket_closed(int sock) {
     char buf;
     int rc = recv(sock, &buf, 1, MSG_PEEK);

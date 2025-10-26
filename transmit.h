@@ -11,5 +11,7 @@ int upload_file(LIBSSH2_SFTP *sftp_session, const char *local_file, const char *
 int sftp_remove_path_recursive(LIBSSH2_SFTP *sftp_session, const char *path, char **err_msg);
 int is_sftp_session_alive(LIBSSH2_SFTP *sftp_session, LIBSSH2_SESSION *session);
 int is_socket_closed(int sock);
+int init_sftp_session_password(const char *hostname, const char *username, const char *password, 
+                                LIBSSH2_SFTP **sftp_session, LIBSSH2_SESSION **session, int *sock);
 
 #endif
