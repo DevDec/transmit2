@@ -16,61 +16,41 @@
 #include <libgen.h>
 #include <sys/select.h>  // For select()
 #include <errno.h>
+#include <netdb.h>
 
 #define SERVER_PORT 22
 
-int init_sftp_session(const char *hostname, const char *username, const char *privkey_path, LIBSSH2_SFTP **sftp_session, LIBSSH2_SESSION **session, int *sock) {
+static int resolve_hostname(const char *hostname, struct sockaddr_in *sin) {
+    struct addrinfo hints, *result, *rp;
     int rc;
-    struct sockaddr_in sin;
-
-    // Init libssh2
-    rc = libssh2_init(0);
+    
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;        // IPv4 only
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    
+    rc = getaddrinfo(hostname, "22", &hints, &result);
     if (rc != 0) {
-        /* fprintf(stderr, "libssh2 initialization failed (%d)\n", rc); */
-        return -1;
-    }
-
-    // Create socket and connect
-    *sock = socket(AF_INET, SOCK_STREAM, 0);  // This modifies *sock
-    if (*sock < 0) {
-        /* perror("Socket creation failed"); */
+        fprintf(stderr, "DEBUG: getaddrinfo failed: %s\n", gai_strerror(rc));
         return -1;
     }
     
-    sin.sin_family = AF_INET;
-    sin.sin_port = htons(22);  // SFTP typically runs on port 22
-    inet_pton(AF_INET, hostname, &sin.sin_addr);
+    // Find the first IPv4 address
+    for (rp = result; rp != NULL; rp = rp->ai_next) {
+        if (rp->ai_family == AF_INET) {
+            memcpy(sin, rp->ai_addr, sizeof(struct sockaddr_in));
+            sin->sin_port = htons(22);  // Ensure port is set
+            freeaddrinfo(result);
+            return 0;
+        }
+    }
     
-    if (connect(*sock, (struct sockaddr*)(&sin), sizeof(struct sockaddr_in)) != 0) {
-        /* perror("Socket connection failed"); */
-        return -1;
-    }
-
-    // Create SSH session
-    *session = libssh2_session_init();
-    if (libssh2_session_handshake(*session, *sock)) {
-        /* fprintf(stderr, "SSH session handshake failed\n"); */
-        return -1;
-    }
-
-    // Authenticate with public key
-    const char *passphrase = NULL;  // or your passphrase
-    if (libssh2_userauth_publickey_fromfile(*session, username, NULL, privkey_path, passphrase)) {
-        /* fprintf(stderr, "Authentication with public key failed\n"); */
-        return -1;
-    }
-
-    // Init SFTP session
-    *sftp_session = libssh2_sftp_init(*session);
-    if (!(*sftp_session)) {
-        /* fprintf(stderr, "Unable to init SFTP session\n"); */
-        return -1;
-    }
-
-    return 0;
+    fprintf(stderr, "DEBUG: No IPv4 address found for hostname\n");
+    freeaddrinfo(result);
+    return -1;
 }
 
-int init_sftp_session_password(const char *hostname, const char *username, const char *password, LIBSSH2_SFTP **sftp_session, LIBSSH2_SESSION **session, int *sock) {
+int init_sftp_session(const char *hostname, const char *username, const char *privkey_path, LIBSSH2_SFTP **sftp_session, LIBSSH2_SESSION **session, int *sock) {
     int rc;
     struct sockaddr_in sin;
 
@@ -86,31 +66,105 @@ int init_sftp_session_password(const char *hostname, const char *username, const
         return -1;
     }
     
-    sin.sin_family = AF_INET;
-    sin.sin_port = htons(22);
-    inet_pton(AF_INET, hostname, &sin.sin_addr);
+    // Resolve hostname
+    if (resolve_hostname(hostname, &sin) != 0) {
+        close(*sock);
+        return -1;
+    }
     
     if (connect(*sock, (struct sockaddr*)(&sin), sizeof(struct sockaddr_in)) != 0) {
+        close(*sock);
         return -1;
     }
 
     // Create SSH session
     *session = libssh2_session_init();
     if (libssh2_session_handshake(*session, *sock)) {
+        close(*sock);
         return -1;
     }
 
-    // Authenticate with password
-    if (libssh2_userauth_password(*session, username, password)) {
+    // Authenticate with public key
+    const char *passphrase = NULL;
+    if (libssh2_userauth_publickey_fromfile(*session, username, NULL, privkey_path, passphrase)) {
+        close(*sock);
         return -1;
     }
 
     // Init SFTP session
     *sftp_session = libssh2_sftp_init(*session);
     if (!(*sftp_session)) {
+        close(*sock);
         return -1;
     }
 
+    return 0;
+}
+
+int init_sftp_session_password(const char *hostname, const char *username, const char *password, LIBSSH2_SFTP **sftp_session, LIBSSH2_SESSION **session, int *sock) {
+    int rc;
+    struct sockaddr_in sin;
+    memset(&sin, 0, sizeof(sin));  // Clear the structure
+
+    fprintf(stderr, "DEBUG: Initializing libssh2...\n");
+    rc = libssh2_init(0);
+    if (rc != 0) {
+        fprintf(stderr, "DEBUG: libssh2_init failed: %d\n", rc);
+        return -1;
+    }
+
+    fprintf(stderr, "DEBUG: Creating socket...\n");
+    *sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (*sock < 0) {
+        fprintf(stderr, "DEBUG: socket creation failed\n");
+        return -1;
+    }
+    
+    fprintf(stderr, "DEBUG: Resolving hostname: %s...\n", hostname);
+    if (resolve_hostname(hostname, &sin) != 0) {
+        fprintf(stderr, "DEBUG: Failed to resolve hostname: %s\n", hostname);
+        close(*sock);
+        return -1;
+    }
+    
+    // Don't set sin_family or sin_port here - resolve_hostname does it
+    
+    fprintf(stderr, "DEBUG: Connecting to %s:22...\n", hostname);
+    if (connect(*sock, (struct sockaddr*)(&sin), sizeof(struct sockaddr_in)) != 0) {
+        fprintf(stderr, "DEBUG: connect failed: %s\n", strerror(errno));
+        close(*sock);
+        return -1;
+    }
+    fprintf(stderr, "DEBUG: Creating SSH session...\n");
+    *session = libssh2_session_init();
+    
+    fprintf(stderr, "DEBUG: Starting SSH handshake...\n");
+    if (libssh2_session_handshake(*session, *sock)) {
+        fprintf(stderr, "DEBUG: SSH handshake failed\n");
+        close(*sock);
+        return -1;
+    }
+
+    fprintf(stderr, "DEBUG: Authenticating with password...\n");
+    if (libssh2_userauth_password(*session, username, password)) {
+        fprintf(stderr, "DEBUG: Password authentication failed\n");
+        char *err_msg;
+        int err_len;
+        int err = libssh2_session_last_error(*session, &err_msg, &err_len, 0);
+        fprintf(stderr, "DEBUG: libssh2 error %d: %s\n", err, err_msg);
+        close(*sock);
+        return -1;
+    }
+
+    fprintf(stderr, "DEBUG: Initializing SFTP...\n");
+    *sftp_session = libssh2_sftp_init(*session);
+    if (!(*sftp_session)) {
+        fprintf(stderr, "DEBUG: SFTP init failed\n");
+        close(*sock);
+        return -1;
+    }
+
+    fprintf(stderr, "DEBUG: Connection successful!\n");
     return 0;
 }
 

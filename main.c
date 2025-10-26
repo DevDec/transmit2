@@ -39,20 +39,27 @@ int main() {
     }
     auth_method[strcspn(auth_method, "\n")] = 0;
     
-    if (strcmp(auth_method, "password") == 0) {
-        printf("Enter password: ");
-        fflush(stdout);
-        if (!fgets(password, sizeof(password), stdin)) {
-            printf("0|Failed to read password\n");
-            return 1;
-        }
-        password[strcspn(password, "\n")] = 0;
-        
-        if (init_sftp_session_password(hostname, username, password, &sftp_session, &session, &sock) != 0) {
-            printf("0|Failed to establish SFTP session with password\n");
-            return 1;
-        }
-    } else {
+	if (strcmp(auth_method, "password") == 0) {
+		printf("Enter password: ");
+		fflush(stdout);
+		if (!fgets(password, sizeof(password), stdin)) {
+			printf("0|Failed to read password\n");
+			return 1;
+		}
+		password[strcspn(password, "\n")] = 0;
+
+		printf("DEBUG: Attempting password authentication...\n");  // ADD THIS
+		fflush(stdout);
+
+		if (init_sftp_session_password(hostname, username, password, &sftp_session, &session, &sock) != 0) {
+			printf("0|Failed to establish SFTP session with password\n");
+			fflush(stdout);
+			return 1;
+		}
+
+		printf("DEBUG: Password authentication succeeded\n");  // ADD THIS
+		fflush(stdout);
+	} else {
         printf("Enter path to private key: ");
         fflush(stdout);
         if (!fgets(privkey_path, sizeof(privkey_path), stdin)) {
