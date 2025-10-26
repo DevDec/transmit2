@@ -644,15 +644,17 @@ function sftp.parse_sftp_config(config_location)
     return false
   end
   
-  state.server_config = result
-  
-  -- DEBUG: Log how many servers were loaded
-  local count = 0
-  for k, v in pairs(result) do
-    count = count + 1
-    log(LOG_LEVELS.INFO, "Loaded server: " .. k)
+  -- Clear existing config
+  for k in pairs(state.server_config) do
+    state.server_config[k] = nil
   end
-  log(LOG_LEVELS.INFO, "Total servers loaded: " .. count, true)
+  
+  -- Copy new config into existing table (preserves reference)
+  for k, v in pairs(result) do
+    state.server_config[k] = v
+  end
+  
+  log(LOG_LEVELS.INFO, "Loaded " .. vim.tbl_count(state.server_config) .. " server(s)", true)
   
   return true
 end
