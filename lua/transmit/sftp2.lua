@@ -630,6 +630,8 @@ end
 ---@param config_location string Path to the configuration file
 ---@return boolean success True if config was loaded successfully
 function sftp.parse_sftp_config(config_location)
+  log(LOG_LEVELS.INFO, "Attempting to parse config from: " .. config_location)
+  
   local path = Path:new(config_location)
   if not path:exists() then 
     log(LOG_LEVELS.ERROR, "Config file not found: " .. config_location, true)
@@ -643,7 +645,15 @@ function sftp.parse_sftp_config(config_location)
   end
   
   state.server_config = result
-  log(LOG_LEVELS.INFO, "Loaded SFTP configuration from " .. config_location)
+  
+  -- DEBUG: Log how many servers were loaded
+  local count = 0
+  for k, v in pairs(result) do
+    count = count + 1
+    log(LOG_LEVELS.INFO, "Loaded server: " .. k)
+  end
+  log(LOG_LEVELS.INFO, "Total servers loaded: " .. count, true)
+  
   return true
 end
 
