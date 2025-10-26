@@ -148,6 +148,13 @@ function transmit.setup(config)
     return false
   end
 
+  -- Parse SFTP configuration FIRST
+  local success = sftp.parse_sftp_config(config.config_location)
+  if not success then
+    vim.notify("Transmit: Failed to parse SFTP configuration", vim.log.levels.ERROR)
+    return false
+  end
+
   -- Register commands
   vim.api.nvim_create_user_command('TransmitOpenSelectWindow', function()
     transmit.open_select_window()
@@ -161,36 +168,26 @@ function transmit.setup(config)
     transmit.remove_path()
   end, { desc = "Remove current file from remote via SFTP" })
 
-  -- Parse SFTP configuration
-  local success = sftp.parse_sftp_config(config.config_location)
-  if not success then
-    vim.notify("Transmit: Failed to parse SFTP configuration", vim.log.levels.ERROR)
-    return false
-  end
-
+  -- NOW check if a server is selected for current directory (optional)
   local server_config = sftp.get_sftp_server_config()
 
-  if not server_config then
-    -- No server selected yet, which is fine
-    return true
-  end
+  if server_config then
+    -- Setup auto-upload on buffer write if configured
+    if server_config.upload_on_bufwrite then
+      vim.api.nvim_create_augroup("TransmitAutoCommands", { clear = true })
+      vim.api.nvim_create_autocmd("BufWritePost", {
+        group = "TransmitAutoCommands",
+        callback = function()
+          transmit.upload_file()
+        end,
+        desc = "Auto-upload file after save"
+      })
+    end
 
-  -- Setup auto-upload on buffer write if configured
-  if server_config.upload_on_bufwrite then
-    vim.api.nvim_create_augroup("TransmitAutoCommands", { clear = true })
-    vim.api.nvim_create_autocmd("BufWritePost", {
-      group = "TransmitAutoCommands",
-      callback = function()
-        transmit.upload_file()
-      end,
-      desc = "Auto-upload file after save"
-    })
-  end
-
-  -- Setup directory watching if configured
-  if server_config.watch_for_changes then
-    -- Watch functionality can be enabled per-server
-    -- Actual watching starts when a server/remote is selected
+    -- Setup directory watching if configured
+    if server_config.watch_for_changes then
+      -- Watch functionality enabled
+    end
   end
 
   return true
