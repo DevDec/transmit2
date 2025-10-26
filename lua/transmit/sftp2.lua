@@ -381,133 +381,139 @@ end
 ---@param callback function|nil Optional callback to run after connection is ready
 ---@return boolean success Returns false if connection setup failed
 function sftp.ensure_connection(callback)
-  if state.transmit_job and state.connection_ready then
-    if callback then callback() end
-    reset_keepalive_timer()
-    return true
-  end
-  if state.connecting then return false end
-  state.connecting = true
+	if state.transmit_job and state.connection_ready then
+		if callback then callback() end
+		reset_keepalive_timer()
+		return true
+	end
+	if state.connecting then return false end
+	state.connecting = true
 
-  local config_data = sftp.get_sftp_server_config()
-  if not config_data then
-    state.connecting = false
-    log(LOG_LEVELS.ERROR, "No SFTP server configuration found", true)
-    return false
-  end
+	local config_data = sftp.get_sftp_server_config()
+	if not config_data then
+		state.connecting = false
+		log(LOG_LEVELS.ERROR, "No SFTP server configuration found", true)
+		return false
+	end
 
-  local transmit_executable = get_transmit_path()
-  if not transmit_executable then
-    state.connecting = false
-    return false
-  end
-  
-  state.transmit_phase = PHASE.INIT
+	local transmit_executable = get_transmit_path()
+	if not transmit_executable then
+		state.connecting = false
+		return false
+	end
 
-  start_auth_timeout()
-  
-  log(LOG_LEVELS.INFO, "Starting SFTP connection to " .. config_data.credentials.host)
+	state.transmit_phase = PHASE.INIT
 
-  state.transmit_job = vim.fn.jobstart({ transmit_executable }, {
-    stdout_buffered = false,
-    stderr_buffered = false,
-    pty = false,
-    on_stdout = function(_, data)
-      local log_file_path = vim.fn.stdpath("cache") .. "/sftp_log.txt"
-      local log_file = get_log_file(log_file_path)
-      
-      if not log_file then
-        log(LOG_LEVELS.WARN, "Failed to open SFTP log file")
-        return
-      end
+	start_auth_timeout()
 
-      local timestamp_format = "[%Y-%m-%d %H:%M:%S] "
-      local progress_path = nil
+	log(LOG_LEVELS.INFO, "Starting SFTP connection to " .. config_data.credentials.host)
 
-      for _, line in ipairs(data) do
-        local timestamp = os.date(timestamp_format)
-        log_file:write(timestamp .. line .. "\n")
+	state.transmit_job = vim.fn.jobstart({ transmit_executable }, {
+		stdout_buffered = false,
+		stderr_buffered = false,
+		pty = false,
+		on_stdout = function(_, data)
+			local log_file_path = vim.fn.stdpath("cache") .. "/sftp_log.txt"
+			local log_file = get_log_file(log_file_path)
 
-        if state.transmit_phase == PHASE.INIT and line:match("Enter SSH hostname") then
-          vim.fn.chansend(state.transmit_job, config_data.credentials.host .. "\n")
-          state.transmit_phase = PHASE.USERNAME
-		  -- In the on_stdout callback, after "Enter SSH username":
-	  elseif transmit_phase == PHASE.USERNAME and line:match("Enter SSH username") then
-		  vim.fn.chansend(state.transmit_job, config_data.credentials.username .. "\n")
-		  transmit_phase = PHASE.AUTH_METHOD
-	  elseif transmit_phase == PHASE.AUTH_METHOD and line:match("Authentication method") then
-		  local auth_type = config_data.credentials.auth_type or "key"
-		  vim.fn.chansend(state.transmit_job, auth_type .. "\n")
-		  if auth_type == "password" then
-			  transmit_phase = PHASE.PASSWORD
-		  else
-			  transmit_phase = PHASE.KEY
-		  end
-	  elseif transmit_phase == PHASE.PASSWORD and line:match("Enter password") then
-		  vim.fn.chansend(state.transmit_job, config_data.credentials.password .. "\n")
-		  transmit_phase = PHASE.READY
-	  elseif transmit_phase == PHASE.KEY and line:match("Enter path to private key") then
-		  vim.fn.chansend(state.transmit_job, config_data.credentials.identity_file .. "\n")
-		  transmit_phase = PHASE.READY
-	  elseif state.transmit_phase == PHASE.READY and line:match("Connected to") then
-          state.transmit_phase = PHASE.ACTIVE
-          state.connecting = false
-          state.connection_ready = true
-          stop_auth_timeout()
-          log(LOG_LEVELS.INFO, "SFTP connection established", true)
-          if callback then callback() end
-        elseif state.transmit_phase == PHASE.ACTIVE then
-          if line:match("^PROGRESS|") then
-            local file, percent = line:match("^PROGRESS|(.-)|(%d+)")
-            percent = tonumber(percent)
-            
-            if file and percent and percent >= 0 and percent <= 100 then
-              if not progress_path or progress_path.filename ~= file then
-                progress_path = Path:new(file)
-              end
-              state.current_progress.file = progress_path:make_relative()
-              state.current_progress.percent = percent
-            else
-              log(LOG_LEVELS.WARN, "Invalid progress data: " .. line)
-            end
-          elseif line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
-            local current_item = get_current_queue_item()
-            if current_item and current_item.processing then
-              log(LOG_LEVELS.DEBUG, "Completed " .. current_item.type .. " for " .. current_item.filename)
-              remove_item_from_queue()
-              state.current_progress = { file = nil, percent = nil }
-              reset_keepalive_timer()
-              sftp.process_next()
-            end
-          end
-        end
-      end
+			if not log_file then
+				log(LOG_LEVELS.WARN, "Failed to open SFTP log file")
+				return
+			end
 
-      log_file:close()
-    end,
+			local timestamp_format = "[%Y-%m-%d %H:%M:%S] "
+			local progress_path = nil
 
-    on_exit = function(_, exit_code, _)
-      state.connection_ready = false
-      state.transmit_job = nil
-      state.connecting = false
-      state.current_progress = { file = nil, percent = nil }
-      stop_auth_timeout()
+			for _, line in ipairs(data) do
+				local timestamp = os.date(timestamp_format)
+				log_file:write(timestamp .. line .. "\n")
 
-      if not state.is_exiting then
-        log(LOG_LEVELS.WARN, "SFTP connection lost (exit code " .. exit_code .. "). Reconnecting...", true)
-        
-        for _, item in ipairs(state.queue) do
-          item.processing = false
-        end
-        
-        sftp.ensure_connection(function()
-          sftp.process_next()
-        end)
-      end
-    end,
-  })
-  
-  return true
+				if state.transmit_phase == PHASE.INIT and line:match("Enter SSH hostname") then
+					vim.fn.chansend(state.transmit_job, config_data.credentials.host .. "\n")
+					state.transmit_phase = PHASE.USERNAME
+
+				elseif state.transmit_phase == PHASE.USERNAME and line:match("Enter SSH username") then
+					vim.fn.chansend(state.transmit_job, config_data.credentials.username .. "\n")
+					state.transmit_phase = PHASE.AUTH_METHOD
+
+				elseif state.transmit_phase == PHASE.AUTH_METHOD and line:match("Authentication method") then
+					local auth_type = config_data.credentials.auth_type or "key"
+					vim.fn.chansend(state.transmit_job, auth_type .. "\n")
+
+					if auth_type == "password" then
+						state.transmit_phase = PHASE.PASSWORD
+					else
+						state.transmit_phase = PHASE.KEY
+					end
+
+				elseif state.transmit_phase == PHASE.PASSWORD and line:match("Enter password") then
+					vim.fn.chansend(state.transmit_job, config_data.credentials.password .. "\n")
+					state.transmit_phase = PHASE.READY
+
+				elseif state.transmit_phase == PHASE.KEY and line:match("Enter path to private key") then
+					vim.fn.chansend(state.transmit_job, config_data.credentials.identity_file .. "\n")
+					state.transmit_phase = PHASE.READY
+
+				elseif state.transmit_phase == PHASE.READY and line:match("Connected to") then
+					state.transmit_phase = PHASE.ACTIVE
+					state.connecting = false
+					state.connection_ready = true
+					stop_auth_timeout()
+					log(LOG_LEVELS.INFO, "SFTP connection established", true)
+					if callback then callback() end
+
+				elseif state.transmit_phase == PHASE.ACTIVE then
+					if line:match("^PROGRESS|") then
+						local file, percent = line:match("^PROGRESS|(.-)|(%d+)")
+						percent = tonumber(percent)
+
+						if file and percent and percent >= 0 and percent <= 100 then
+							if not progress_path or progress_path.filename ~= file then
+								progress_path = Path:new(file)
+							end
+							state.current_progress.file = progress_path:make_relative()
+							state.current_progress.percent = percent
+						else
+							log(LOG_LEVELS.WARN, "Invalid progress data: " .. line)
+						end
+					elseif line:match("^1|Upload succeeded") or line:match("^1|Remove succeeded") or line:match("^0|") then
+						local current_item = get_current_queue_item()
+						if current_item and current_item.processing then
+							log(LOG_LEVELS.DEBUG, "Completed " .. current_item.type .. " for " .. current_item.filename)
+							remove_item_from_queue()
+							state.current_progress = { file = nil, percent = nil }
+							reset_keepalive_timer()
+							sftp.process_next()
+						end
+					end
+				end
+			end
+
+			log_file:close()
+		end,
+
+		on_exit = function(_, exit_code, _)
+			state.connection_ready = false
+			state.transmit_job = nil
+			state.connecting = false
+			state.current_progress = { file = nil, percent = nil }
+			stop_auth_timeout()
+
+			if not state.is_exiting then
+				log(LOG_LEVELS.WARN, "SFTP connection lost (exit code " .. exit_code .. "). Reconnecting...", true)
+
+				for _, item in ipairs(state.queue) do
+					item.processing = false
+				end
+
+				sftp.ensure_connection(function()
+					sftp.process_next()
+				end)
+			end
+		end,
+	})
+
+	return true
 end
 
 ---Process the next item in the queue
