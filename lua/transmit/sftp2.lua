@@ -88,7 +88,10 @@ local state = {
 }
 
 ---@class SFTP
+---@field server_config table<string, ServerConfig>
 local sftp = {}
+
+sftp.server_config = state.server_config
 
 local transmit_server_data = string.format("%s/transmit.json", data_path)
 
