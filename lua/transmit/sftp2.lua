@@ -710,7 +710,7 @@ function sftp.parse_sftp_config(config_location)
     state.server_config[k] = v
   end
   
-  log(LOG_LEVELS.INFO, "Loaded " .. vim.tbl_count(state.server_config) .. " server(s)", true)
+  log(LOG_LEVELS.INFO, "Loaded " .. vim.tbl_count(state.server_config) .. " server(s)")
   
   return true
 end
