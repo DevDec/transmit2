@@ -483,7 +483,15 @@ function sftp.ensure_connection(callback)
 							remove_item_from_queue()
 							state.current_progress = { file = nil, percent = nil }
 							reset_keepalive_timer()
-							sftp.process_next()
+
+							-- ✅ ADD THIS: Check if queue is now empty
+							if #state.queue == 0 then
+								vim.schedule(function()
+									vim.notify("SFTP: All uploads completed", vim.log.levels.INFO)
+								end)
+							else
+								sftp.process_next()
+							end
 						end
 					end
 				end
