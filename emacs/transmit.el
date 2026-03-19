@@ -215,33 +215,34 @@ Search order:
   1. `transmit-binary-path' custom variable (if set)
   2. straight.el repos directory
   3. Relative to this file"
-  (let ((bname (transmit--binary-name)))
-    (unless bname (cl-return-from transmit--binary-path nil))
+  (cl-block transmit--binary-path
+    (let ((bname (transmit--binary-name)))
+      (unless bname (cl-return-from transmit--binary-path nil))
 
-    ;; 1. Explicit override
-    (when transmit-binary-path
-      (let ((found (transmit--try-binary (expand-file-name transmit-binary-path))))
-        (when found (cl-return-from transmit--binary-path found))))
+      ;; 1. Explicit override
+      (when transmit-binary-path
+        (let ((found (transmit--try-binary (expand-file-name transmit-binary-path))))
+          (when found (cl-return-from transmit--binary-path found))))
 
-    ;; 2. straight.el repos
-    (let* ((base (or (bound-and-true-p straight-base-dir)
-                     (expand-file-name ".local" user-emacs-directory)))
-           (path (expand-file-name (concat "straight/repos/transmit2/bin/" bname) base)))
-      (let ((found (transmit--try-binary path)))
-        (when found (cl-return-from transmit--binary-path found))))
-
-    ;; 3. Relative to this .el file
-    (let* ((this-file (or load-file-name buffer-file-name))
-           (repo-root (and this-file
-                           (expand-file-name "../../" (file-name-directory this-file))))
-           (path (and repo-root (expand-file-name (concat "bin/" bname) repo-root))))
-      (when path
+      ;; 2. straight.el repos
+      (let* ((base (or (bound-and-true-p straight-base-dir)
+                       (expand-file-name ".local" user-emacs-directory)))
+             (path (expand-file-name (concat "straight/repos/transmit2/bin/" bname) base)))
         (let ((found (transmit--try-binary path)))
-          (when found (cl-return-from transmit--binary-path found)))))
+          (when found (cl-return-from transmit--binary-path found))))
 
-    (transmit--log 4
-      (format "Binary '%s' not found. Set `transmit-binary-path'." bname) t)
-    nil))
+      ;; 3. Relative to this .el file
+      (let* ((this-file (or load-file-name buffer-file-name))
+             (repo-root (and this-file
+                             (expand-file-name "../../" (file-name-directory this-file))))
+             (path (and repo-root (expand-file-name (concat "bin/" bname) repo-root))))
+        (when path
+          (let ((found (transmit--try-binary path)))
+            (when found (cl-return-from transmit--binary-path found)))))
+
+      (transmit--log 4
+        (format "Binary '%s' not found. Set `transmit-binary-path'." bname) t)
+      nil)))
 
 
 ;;;; ---- Queue ----------------------------------------------------------------
@@ -437,37 +438,38 @@ Search order:
 
 (defun transmit--ensure-connection (&optional callback)
   "Ensure an SFTP connection is live, then call CALLBACK."
-  (cond
-   ((and transmit--process transmit--connection-ready)
-    (when callback (funcall callback))
-    (transmit--reset-keepalive))
+  (cl-block transmit--ensure-connection
+    (cond
+     ((and transmit--process transmit--connection-ready)
+      (when callback (funcall callback))
+      (transmit--reset-keepalive))
 
-   (transmit--connecting
-    (when callback
-      (let ((prev transmit--pending-callback))
-        (setq transmit--pending-callback
-              (if prev (lambda () (funcall prev) (funcall callback)) callback)))))
+     (transmit--connecting
+      (when callback
+        (let ((prev transmit--pending-callback))
+          (setq transmit--pending-callback
+                (if prev (lambda () (funcall prev) (funcall callback)) callback)))))
 
-   (t
-    (let ((cfg (transmit--get-server-config)))
-      (unless cfg
-        (transmit--log 4 "No SFTP server configured for current directory" t)
-        (cl-return-from transmit--ensure-connection nil))
-      (let ((binary (transmit--binary-path)))
-        (unless binary
+     (t
+      (let ((cfg (transmit--get-server-config)))
+        (unless cfg
+          (transmit--log 4 "No SFTP server configured for current directory" t)
           (cl-return-from transmit--ensure-connection nil))
-        (setq transmit--connecting t
-              transmit--phase transmit--phase-init
-              transmit--process-buf ""
-              transmit--pending-callback callback)
-        (transmit--start-auth-timeout)
-        (transmit--log 2
-          (format "Connecting to %s..."
-                  (gethash "host" (gethash "credentials" cfg))) t)
-        (setq transmit--process
-              (make-process :name "transmit" :buffer nil :command (list binary)
-                            :filter #'transmit--filter :sentinel #'transmit--sentinel
-                            :noquery t)))))))
+        (let ((binary (transmit--binary-path)))
+          (unless binary
+            (cl-return-from transmit--ensure-connection nil))
+          (setq transmit--connecting t
+                transmit--phase transmit--phase-init
+                transmit--process-buf ""
+                transmit--pending-callback callback)
+          (transmit--start-auth-timeout)
+          (transmit--log 2
+            (format "Connecting to %s..."
+                    (gethash "host" (gethash "credentials" cfg))) t)
+          (setq transmit--process
+                (make-process :name "transmit" :buffer nil :command (list binary)
+                              :filter #'transmit--filter :sentinel #'transmit--sentinel
+                              :noquery t))))))))
 
 
 ;;;; ---- File exclusion -------------------------------------------------------
