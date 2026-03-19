@@ -83,10 +83,6 @@ function util.remove_path(path, working_dir)
   -- Add to queue
   local queue_id = sftp.add_to_queue("remove", path, working_dir)
   
-  if queue_id then
-    vim.notify("Queued for removal: " .. vim.fn.fnamemodify(path, ":~:."), vim.log.levels.INFO)
-  end
-  
   return queue_id
 end
 
@@ -133,10 +129,6 @@ function util.upload_file(file, working_dir)
   
   -- Add to queue
   local queue_id = sftp.add_to_queue("upload", file, working_dir)
-  
-  if queue_id then
-    vim.notify("Queued for upload: " .. vim.fn.fnamemodify(file, ":~:."), vim.log.levels.INFO)
-  end
   
   return queue_id
 end
