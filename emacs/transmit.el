@@ -221,17 +221,38 @@ Pass \"none\" to clear."
     (if (string= server-name "none")
         (progn
           (remhash root data)
-          (setq transmit--active-server nil
-                transmit--active-remote nil))
+          ;; Clear last-used if it was this server
+          (when (string= transmit--active-server server-name)
+            (setq transmit--active-server nil
+                  transmit--active-remote nil))
+          ;; Update last-used to another project's server if one exists
+          (let ((any (transmit--find-any-selection data)))
+            (when any
+              (setq transmit--active-server (car any)
+                    transmit--active-remote  (cdr any)))))
       (let ((entry (or (gethash root data) (make-hash-table :test 'equal))))
         (puthash "server_name" server-name entry)
         (puthash "remote"      remote      entry)
         (puthash root entry data))
-      ;; Cache globally so modeline shows in all buffers
+      ;; Always cache the most recently selected server globally
       (setq transmit--active-server server-name
-            transmit--active-remote remote))
+            transmit--active-remote remote)
+      ;; Persist last-used so we can restore on restart
+      (puthash "__last_server__" server-name data)
+      (puthash "__last_remote__" remote      data))
     (transmit--write-data data)
     (transmit--modeline-refresh)))
+
+(defun transmit--find-any-selection (data)
+  "Return (server . remote) for any project in DATA, or nil."
+  (let (result)
+    (maphash (lambda (k v)
+               (unless (or (string-prefix-p "__" k) result)
+                 (let ((s (gethash "server_name" v))
+                       (r (gethash "remote" v)))
+                   (when (and s r) (setq result (cons s r))))))
+             data)
+    result))
 
 
 ;;;; ---- Binary Discovery -----------------------------------------------------
@@ -446,21 +467,13 @@ Click to open the queue popup."
                              transmit--active-remote
                              queue-len))))))
 ;; Register with doom-modeline if available, otherwise use global-mode-string
+(defvar transmit--modeline-string '(:eval (transmit--modeline-segment))
+  "The modeline entry — stored as a named variable so add-to-list deduplicates.")
+
 (defun transmit--setup-modeline ()
-  "Hook the transmit segment into doom-modeline or the standard modeline."
-  (if (fboundp 'doom-modeline-def-segment)
-      (progn
-        (eval
-         '(doom-modeline-def-segment transmit
-            "SFTP server status and upload progress."
-            (transmit--modeline-segment)))
-        ;; Append to global-mode-string so doom-modeline picks it up
-        ;; via its misc-info segment — no need to redefine the whole modeline
-        (add-to-list 'global-mode-string
-                     '(:eval (transmit--modeline-segment)) t))
-    ;; Fallback for non-doom modelines
-    (add-to-list 'global-mode-string
-                 '(:eval (transmit--modeline-segment)) t)))
+  "Hook the transmit segment into the modeline (idempotent)."
+  ;; Use a named var so add-to-list can detect it's already present
+  (add-to-list 'global-mode-string 'transmit--modeline-string t))
 
 
 ;;;; ---- Queue Popup ----------------------------------------------------------
@@ -978,9 +991,10 @@ Also starts watching newly-created directories automatically."
     (error (user-error "Transmit: failed to parse config: %s" err)))
   (add-hook 'kill-emacs-hook #'transmit--on-kill-emacs)
   (transmit--setup-modeline)
-  ;; Restore cached server for modeline from persisted state
-  (let ((server (transmit--get-selected-server))
-        (remote (transmit--get-selected-remote)))
+  ;; Restore cached server/remote for modeline from persisted last-used
+  (let* ((data   (transmit--read-data))
+         (server (and data (gethash "__last_server__" data)))
+         (remote (and data (gethash "__last_remote__" data))))
     (when server
       (setq transmit--active-server server
             transmit--active-remote remote)
