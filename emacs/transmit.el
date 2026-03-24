@@ -320,19 +320,40 @@ Pass \"none\" to clear."
     (unless (member type '("upload" "remove"))
       (transmit--log 4 (format "Invalid operation type: %s" type) t)
       (cl-return-from transmit--enqueue nil))
-    (let ((id transmit--next-queue-id))
-      (cl-incf transmit--next-queue-id)
-      (setq transmit--queue
-            (nconc transmit--queue
-                   (list (list :id id
-                               :type type
-                               :filename filename
-                               :working-dir working-dir
-                               :processing nil))))
-      (transmit--log 1 (format "Queued [%d]: %s %s" id type filename))
-      (transmit--modeline-refresh)
-      (transmit--ensure-connection #'transmit--process-next)
-      id)))
+    (let ((file (expand-file-name filename)))
+      ;; Deduplication: handle existing queue entries for this file
+      (let ((existing (cl-find-if (lambda (i)
+                                    (string= (plist-get i :filename) file))
+                                  transmit--queue)))
+        (when existing
+          (cond
+           ;; Already has an upload queued — skip adding anything new
+           ((string= (plist-get existing :type) "upload")
+            (transmit--log 1 (format "Skipping duplicate queue entry for %s" file))
+            (cl-return-from transmit--enqueue nil))
+           ;; Has a remove queued and we're adding an upload — upgrade to upload
+           ((and (string= (plist-get existing :type) "remove")
+                 (string= type "upload"))
+            (transmit--log 1 (format "Upgrading remove→upload for %s" file))
+            (plist-put existing :type "upload")
+            (cl-return-from transmit--enqueue (plist-get existing :id)))
+           ;; Has a remove queued and we're adding another remove — skip
+           ((string= type "remove")
+            (cl-return-from transmit--enqueue nil)))))
+      ;; Not in queue — add it
+      (let ((id transmit--next-queue-id))
+        (cl-incf transmit--next-queue-id)
+        (setq transmit--queue
+              (nconc transmit--queue
+                     (list (list :id id
+                                 :type type
+                                 :filename file
+                                 :working-dir working-dir
+                                 :processing nil))))
+        (transmit--log 1 (format "Queued [%d]: %s %s" id type file))
+        (transmit--modeline-refresh)
+        (transmit--ensure-connection #'transmit--process-next)
+        id))))
 
 (defun transmit--queue-head ()
   "Return the first queue item, or nil."
@@ -836,8 +857,11 @@ Also starts watching newly-created directories automatically."
               (when root (transmit--enqueue "upload" file root))))))
 
        ((eq action 'deleted)
-        (let ((root (transmit--find-watch-root file)))
-          (when root (transmit--enqueue "remove" file root))))
+        ;; Skip remove if file was recently saved — magit discard deletes then
+        ;; rewrites the file, the subsequent 'created' event handles the upload
+        (unless (transmit--recently-uploaded-p file)
+          (let ((root (transmit--find-watch-root file)))
+            (when root (transmit--enqueue "remove" file root)))))
 
        ((eq action 'changed)
         (when (and (file-regular-p file)
