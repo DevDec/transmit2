@@ -53,7 +53,10 @@
 
 (defconst transmit--excluded-patterns
   (list "\\.vim\\.bak$" "\\.sw[a-z]$" "\\.tmp$" "\\.git"
-        "node_modules" "__pycache__" "\\.DS_Store$")
+        "node_modules" "__pycache__" "\\.DS_Store$"
+        "^\\.#"          ; Emacs lock files (.#filename)
+        "/\\.#"          ; Emacs lock files in subdirectories
+        "#.*#$")         ; Emacs auto-save files (#filename#)
   "Filename patterns excluded from file-watching and uploads.")
 
 
@@ -1235,7 +1238,8 @@ them all for upload."
           (dolist (pair files)
             (let ((status (car pair))
                   (file   (cdr pair)))
-              (cond
+              (unless (transmit--excluded-p file)
+                (cond
                ;; Deleted — queue a remove on the remote
                ((string-match-p "^D" status)
                 (transmit--enqueue "remove" file root)
@@ -1244,7 +1248,7 @@ them all for upload."
                ((file-regular-p file)
                 (transmit--debounce-file file)
                 (transmit--enqueue "upload" file root)
-                (cl-incf count)))))
+                (cl-incf count))))))
           (message "Transmit: queued %d file%s (%d deleted)"
                    count
                    (if (= count 1) "" "s")
