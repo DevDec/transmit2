@@ -1200,7 +1200,31 @@ Newly created files and directories are automatically watched."
       (message "Transmit: cleared %d item%s" n (if (= n 1) "" "s")))))
 
 ;;;###autoload
-(defun transmit-reset ()
+(defun transmit-retry ()
+  "Unstick and reprocess the queue without clearing it.
+Use this when uploads have stalled but you want to keep queued files."
+  (interactive)
+  ;; Unmark all processing items so they get retried
+  (dolist (item transmit--queue)
+    (plist-put item :processing nil))
+  ;; Kill stale process if dead
+  (when (and transmit--process
+             (not (process-live-p transmit--process)))
+    (delete-process transmit--process)
+    (setq transmit--process nil))
+  ;; Reset connection flags so ensure-connection starts fresh
+  (setq transmit--connecting       nil
+        transmit--connection-ready nil
+        transmit--process-buf      "")
+  (transmit--stop-auth-timeout)
+  (transmit--modeline-refresh)
+  (if transmit--queue
+      (progn
+        (transmit--ensure-connection #'transmit--process-next)
+        (message "Transmit: retrying %d queued item%s"
+                 (length transmit--queue)
+                 (if (= (length transmit--queue) 1) "" "s")))
+    (message "Transmit: queue is empty")))
   "Fully reset transmit state — clears queue, kills process, resets all flags.
 Use this when the queue is stuck or the process is in a bad state."
   (interactive)
