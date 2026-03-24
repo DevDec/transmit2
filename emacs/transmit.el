@@ -706,7 +706,12 @@ Pass \"none\" to clear."
     (when transmit--pending-callback
       (let ((cb transmit--pending-callback))
         (setq transmit--pending-callback nil)
-        (funcall cb))))
+        (run-at-time 0.2 nil cb))))
+
+   ;; Ignore duplicate "Connected to" messages if already active
+   ((and (string= transmit--phase transmit--phase-active)
+         (string-match-p "Connected to" line))
+    nil)
 
    ((and (string= transmit--phase transmit--phase-active)
          (string-match "^PROGRESS|\\(.*\\)|\\([0-9]+\\)$" line))
