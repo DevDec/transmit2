@@ -111,8 +111,12 @@ When nil the binary is found automatically."
 (defvar transmit--current-progress (list :file nil :percent nil))
 (defvar transmit--watchers (make-hash-table :test 'equal))
 (defvar transmit--auto-upload-hook-installed nil)
-;; Modeline update timer — forces modeline refresh periodically during upload
 (defvar transmit--modeline-timer nil)
+;; Cached active server/remote — updated on selection, shown in all buffers
+(defvar transmit--active-server nil)
+(defvar transmit--active-remote nil)
+;; Debounce table: tracks recently-queued files to prevent double-queueing
+(defvar transmit--recent-uploads (make-hash-table :test 'equal))
 
 
 ;;;; ---- Project Root ---------------------------------------------------------
@@ -215,11 +219,17 @@ Pass \"none\" to clear."
   (let* ((root (transmit--project-root dir))
          (data (or (transmit--read-data) (make-hash-table :test 'equal))))
     (if (string= server-name "none")
-        (remhash root data)
+        (progn
+          (remhash root data)
+          (setq transmit--active-server nil
+                transmit--active-remote nil))
       (let ((entry (or (gethash root data) (make-hash-table :test 'equal))))
         (puthash "server_name" server-name entry)
         (puthash "remote"      remote      entry)
-        (puthash root entry data)))
+        (puthash root entry data))
+      ;; Cache globally so modeline shows in all buffers
+      (setq transmit--active-server server-name
+            transmit--active-remote remote))
     (transmit--write-data data)
     (transmit--modeline-refresh)))
 
@@ -396,48 +406,45 @@ Pass \"none\" to clear."
 
 (defun transmit--modeline-segment ()
   "Return a propertized modeline string for the transmit status.
-Shows server→remote when idle, progress bar when uploading.
+Uses cached server/remote so it persists across all buffers.
 Click to open the queue popup."
-  (when (hash-table-p transmit--server-config)
-    (let* ((server (transmit--get-selected-server))
-           (remote (transmit--get-selected-remote)))
-      (when server
-        (let* ((progress  (transmit-get-progress))
-               (file      (plist-get progress :file))
-               (pct       (or (plist-get progress :percent) 0))
-               (queue-len (length transmit--queue))
-               (map       (make-sparse-keymap)))
-          ;; Click → queue popup
-          (define-key map [mode-line mouse-1] #'transmit-show-queue-popup)
-          (define-key map [mode-line mouse-3] #'transmit-show-queue-popup)
-          (propertize
-           (concat
-            " ⇪ "
-            (propertize (format "%s→%s" server remote)
-                        'face (if transmit--connection-ready
-                                  '(:foreground "#88c0d0" :weight bold)
-                                '(:foreground "#616e88")))
-            (when file
-              (concat
-               " "
-               (propertize
-                (transmit--modeline-progress-bar pct 10)
-                'face '(:foreground "#a3be8c"))
-               (propertize
-                (format " %d%%" pct)
-                'face '(:foreground "#a3be8c" :weight bold))))
-            (when (and (> queue-len 0) (not file))
-              (propertize (format " [%d queued]" queue-len)
-                          'face '(:foreground "#ebcb8b")))
-            " ")
-           'mouse-face 'mode-line-highlight
-           'local-map  map
-           'help-echo  (if file
-                           (format "Uploading: %s (%d%%)\nClick to show queue"
-                                   (file-name-nondirectory file) pct)
-                         (format "SFTP: %s → %s | %d queued\nClick to show queue"
-                                 server remote queue-len))))))))
-
+  (when transmit--active-server
+    (let* ((progress  (transmit-get-progress))
+           (file      (plist-get progress :file))
+           (pct       (or (plist-get progress :percent) 0))
+           (queue-len (length transmit--queue))
+           (map       (make-sparse-keymap)))
+      (define-key map [mode-line mouse-1] #'transmit-show-queue-popup)
+      (define-key map [mode-line mouse-3] #'transmit-show-queue-popup)
+      (propertize
+       (concat
+        " ⇪ "
+        (propertize (format "%s→%s" transmit--active-server transmit--active-remote)
+                    'face (if transmit--connection-ready
+                              '(:foreground "#88c0d0" :weight bold)
+                            '(:foreground "#616e88")))
+        (when file
+          (concat
+           " "
+           (propertize
+            (transmit--modeline-progress-bar pct 10)
+            'face '(:foreground "#a3be8c"))
+           (propertize
+            (format " %d%%" pct)
+            'face '(:foreground "#a3be8c" :weight bold))))
+        (when (and (> queue-len 0) (not file))
+          (propertize (format " [%d queued]" queue-len)
+                      'face '(:foreground "#ebcb8b")))
+        " ")
+       'mouse-face 'mode-line-highlight
+       'local-map  map
+       'help-echo  (if file
+                       (format "Uploading: %s (%d%%)\nClick to show queue"
+                               (file-name-nondirectory file) pct)
+                     (format "SFTP: %s → %s | %d queued\nClick to show queue"
+                             transmit--active-server
+                             transmit--active-remote
+                             queue-len))))))
 ;; Register with doom-modeline if available, otherwise use global-mode-string
 (defun transmit--setup-modeline ()
   "Hook the transmit segment into doom-modeline or the standard modeline."
@@ -800,7 +807,9 @@ Also starts watching newly-created directories automatically."
           (when root (transmit--enqueue "remove" file root))))
 
        ((eq action 'changed)
-        (when (and (file-regular-p file) (not (transmit--excluded-p file)))
+        (when (and (file-regular-p file)
+                   (not (transmit--excluded-p file))
+                   (not (transmit--recently-uploaded-p file)))
           (let ((root (transmit--find-watch-root file)))
             (when root (transmit--enqueue "upload" file root)))))))))
 
@@ -903,6 +912,15 @@ Also starts watching newly-created directories automatically."
 (defvar transmit--save-in-progress nil
   "Non-nil while we are already handling an after-save-hook to prevent re-entrancy.")
 
+(defun transmit--debounce-file (file)
+  "Mark FILE as recently uploaded for 2 seconds to suppress watcher dupes."
+  (puthash file t transmit--recent-uploads)
+  (run-at-time 2.0 nil (lambda () (remhash file transmit--recent-uploads))))
+
+(defun transmit--recently-uploaded-p (file)
+  "Return non-nil if FILE was uploaded in the last 2 seconds."
+  (gethash file transmit--recent-uploads))
+
 (defun transmit--after-save-hook ()
   "Upload the saved buffer if its project has a server selected."
   (when (and buffer-file-name
@@ -916,6 +934,8 @@ Also starts watching newly-created directories automatically."
       (unless (cl-some (lambda (item)
                          (string= (plist-get item :filename) file))
                        transmit--queue)
+        ;; Mark as recently saved so file watcher ignores this event
+        (transmit--debounce-file file)
         (transmit--enqueue "upload" file root)))))
 
 
@@ -958,6 +978,13 @@ Also starts watching newly-created directories automatically."
     (error (user-error "Transmit: failed to parse config: %s" err)))
   (add-hook 'kill-emacs-hook #'transmit--on-kill-emacs)
   (transmit--setup-modeline)
+  ;; Restore cached server for modeline from persisted state
+  (let ((server (transmit--get-selected-server))
+        (remote (transmit--get-selected-remote)))
+    (when server
+      (setq transmit--active-server server
+            transmit--active-remote remote)
+      (transmit--modeline-refresh)))
   (let ((cfg (transmit--get-server-config)))
     (when cfg
       (when (gethash "upload_on_bufwrite" cfg) (transmit--install-auto-upload))
