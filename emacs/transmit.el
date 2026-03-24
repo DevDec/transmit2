@@ -398,7 +398,22 @@ Pass \"none\" to clear."
   "Start a repeating timer to refresh the modeline during uploads."
   (unless transmit--modeline-timer
     (setq transmit--modeline-timer
-          (run-with-timer 0.5 0.5 #'transmit--modeline-refresh))))
+          (run-with-timer 0.5 0.5 #'transmit--watchdog))))
+
+(defun transmit--watchdog ()
+  "Refresh modeline and unstick queue if process has died."
+  (force-mode-line-update t)
+  ;; If head item is stuck processing but process is dead, unstick and retry
+  (let ((head (transmit--queue-head)))
+    (when (and head
+               (plist-get head :processing)
+               (not (and transmit--process
+                         (process-live-p transmit--process))))
+      (transmit--log 2 "Watchdog: unsticking stalled queue item")
+      (plist-put head :processing nil)
+      (setq transmit--connection-ready nil
+            transmit--connecting       nil)
+      (transmit--ensure-connection #'transmit--process-next))))
 
 (defun transmit--stop-modeline-timer ()
   "Stop the modeline refresh timer."
@@ -729,6 +744,7 @@ Pass \"none\" to clear."
   (transmit--modeline-refresh)
   (unless transmit--is-exiting
     (transmit--log 3 "SFTP connection lost, reconnecting..." t)
+    ;; Unmark all processing items so they get retried on reconnect
     (dolist (item transmit--queue)
       (plist-put item :processing nil))
     (transmit--ensure-connection #'transmit--process-next)))
@@ -1044,7 +1060,25 @@ and start watching the project if it has a server selected."
     (transmit--log 2 "Auto-upload on save enabled" t)))
 
 
-;;;; ---- Interactive commands -------------------------------------------------
+;;;; ---- Magit integration ----------------------------------------------------
+
+(defun transmit--magit-post-refresh ()
+  "After a magit refresh, unstick any stalled queue items and retry."
+  (when transmit--queue
+    ;; If the head item is marked processing but the process is dead,
+    ;; it's stuck — unmark it so it gets retried
+    (let ((head (transmit--queue-head)))
+      (when (and head
+                 (plist-get head :processing)
+                 (not (and transmit--process
+                           (process-live-p transmit--process))))
+        (transmit--log 2 "Unsticking stalled queue item after magit refresh")
+        (plist-put head :processing nil)))
+    ;; Re-attempt processing
+    (transmit--ensure-connection #'transmit--process-next)))
+
+(with-eval-after-load 'magit
+  (add-hook 'magit-post-refresh-hook #'transmit--magit-post-refresh))
 
 ;;;###autoload
 (defun transmit-select-server ()
@@ -1140,6 +1174,33 @@ Newly created files and directories are automatically watched."
       (transmit--modeline-refresh)
       (transmit--maybe-refresh-queue-buffer)
       (message "Transmit: cleared %d item%s" n (if (= n 1) "" "s")))))
+
+;;;###autoload
+(defun transmit-reset ()
+  "Fully reset transmit state — clears queue, kills process, resets all flags.
+Use this when the queue is stuck or the process is in a bad state."
+  (interactive)
+  ;; Kill the process hard
+  (when transmit--process
+    (condition-case nil (delete-process transmit--process) (error nil))
+    (setq transmit--process nil))
+  ;; Cancel all timers
+  (transmit--stop-modeline-timer)
+  (transmit--stop-auth-timeout)
+  (when transmit--keepalive-timer
+    (cancel-timer transmit--keepalive-timer)
+    (setq transmit--keepalive-timer nil))
+  ;; Reset all state
+  (setq transmit--queue              '()
+        transmit--phase              transmit--phase-init
+        transmit--connecting         nil
+        transmit--connection-ready   nil
+        transmit--pending-callback   nil
+        transmit--process-buf        ""
+        transmit--current-progress   (list :file nil :percent nil))
+  (transmit--modeline-refresh)
+  (transmit--maybe-refresh-queue-buffer)
+  (message "Transmit: reset complete — queue cleared, connection closed"))
 
 ;;;###autoload
 (defun transmit-cancel-item (id)
