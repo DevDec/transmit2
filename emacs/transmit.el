@@ -280,7 +280,7 @@ Pass \"none\" to clear."
             (cl-return-from transmit--binary-path found))))
 
       (transmit--log 4
-					 (format "Binary '%s' not found. Set `transmit-binary-path'." bname) t)
+        (format "Binary '%s' not found. Set `transmit-binary-path'." bname) t)
       nil)))
 
 
@@ -330,35 +330,35 @@ Pass \"none\" to clear."
   (when transmit--keepalive-timer (cancel-timer transmit--keepalive-timer))
   (setq transmit--keepalive-timer
         (run-with-timer transmit-keepalive-timeout nil
-						(lambda ()
-						  (when transmit--process
-							(condition-case nil
-								(process-send-string transmit--process "exit\n")
-							  (error nil))
-							(setq transmit--process          nil
-								  transmit--phase            transmit--phase-init
-								  transmit--connecting       nil
-								  transmit--connection-ready nil)
-							(transmit--log 2 "SFTP closed after inactivity" t))
-						  (setq transmit--keepalive-timer nil)
-						  (transmit--modeline-refresh)))))
+          (lambda ()
+            (when transmit--process
+              (condition-case nil
+                  (process-send-string transmit--process "exit\n")
+                (error nil))
+              (setq transmit--process          nil
+                    transmit--phase            transmit--phase-init
+                    transmit--connecting       nil
+                    transmit--connection-ready nil)
+              (transmit--log 2 "SFTP closed after inactivity" t))
+            (setq transmit--keepalive-timer nil)
+            (transmit--modeline-refresh)))))
 
 (defun transmit--start-auth-timeout ()
   "Start the authentication watchdog timer."
   (when transmit--auth-timeout-timer (cancel-timer transmit--auth-timeout-timer))
   (setq transmit--auth-timeout-timer
         (run-with-timer transmit-auth-timeout nil
-						(lambda ()
-						  (when (and transmit--connecting (not transmit--connection-ready))
-							(transmit--log 4 "SFTP authentication timed out" t)
-							(when transmit--process
-							  (delete-process transmit--process)
-							  (setq transmit--process nil))
-							(setq transmit--phase            transmit--phase-init
-								  transmit--connecting       nil
-								  transmit--connection-ready nil))
-						  (setq transmit--auth-timeout-timer nil)
-						  (transmit--modeline-refresh)))))
+          (lambda ()
+            (when (and transmit--connecting (not transmit--connection-ready))
+              (transmit--log 4 "SFTP authentication timed out" t)
+              (when transmit--process
+                (delete-process transmit--process)
+                (setq transmit--process nil))
+              (setq transmit--phase            transmit--phase-init
+                    transmit--connecting       nil
+                    transmit--connection-ready nil))
+            (setq transmit--auth-timeout-timer nil)
+            (transmit--modeline-refresh)))))
 
 (defun transmit--stop-auth-timeout ()
   "Cancel the authentication watchdog timer."
@@ -447,20 +447,11 @@ Click to open the queue popup."
          '(doom-modeline-def-segment transmit
             "SFTP server status and upload progress."
             (transmit--modeline-segment)))
-        ;; Add to the modeline — insert after the major-mode segment
-        (doom-modeline-def-modeline 'transmit-modeline
-          '(bar workspace-name window-number modals matches follow buffer-info
-                remote-host buffer-position word-count parrot selection-info)
-          '(compilation objed-state misc-info transmit persp-name battery
-                        grip irc mu4e gnus github debug repl lsp minor-modes
-                        input-method indent-info buffer-encoding major-mode
-                        process vcs checker time))
-        ;; Activate on all buffers
-        (add-hook 'after-change-major-mode-hook
-                  (lambda ()
-                    (when (doom-modeline-auto-set-modeline)
-                      (doom-modeline-set-modeline 'transmit-modeline)))))
-    ;; Fallback: prepend to global-mode-string for non-doom modelines
+        ;; Append to global-mode-string so doom-modeline picks it up
+        ;; via its misc-info segment — no need to redefine the whole modeline
+        (add-to-list 'global-mode-string
+                     '(:eval (transmit--modeline-segment)) t))
+    ;; Fallback for non-doom modelines
     (add-to-list 'global-mode-string
                  '(:eval (transmit--modeline-segment)) t)))
 
@@ -751,8 +742,8 @@ Click to open the queue popup."
           (transmit--start-auth-timeout)
           (transmit--modeline-refresh)
           (transmit--log 2
-						 (format "Connecting to %s..."
-								 (gethash "host" (gethash "credentials" cfg))) t)
+            (format "Connecting to %s..."
+                    (gethash "host" (gethash "credentials" cfg))) t)
           (setq transmit--process
                 (make-process
                  :name            "transmit"
@@ -950,8 +941,8 @@ Also starts watching newly-created directories automatically."
           (clrhash transmit--server-config)
           (maphash (lambda (k v) (puthash k v transmit--server-config)) parsed)
           (transmit--log 2
-						 (format "Loaded %d server(s) from %s"
-								 (hash-table-count transmit--server-config) config-location) t)))
+            (format "Loaded %d server(s) from %s"
+                    (hash-table-count transmit--server-config) config-location) t)))
     (error (user-error "Transmit: failed to parse config: %s" err)))
   (add-hook 'kill-emacs-hook #'transmit--on-kill-emacs)
   (transmit--setup-modeline)
