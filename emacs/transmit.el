@@ -236,10 +236,7 @@ Pass \"none\" to clear."
         (puthash root entry data))
       ;; Always cache the most recently selected server globally
       (setq transmit--active-server server-name
-            transmit--active-remote remote)
-      ;; Persist last-used so we can restore on restart
-      (puthash "__last_server__" server-name data)
-      (puthash "__last_remote__" remote      data))
+            transmit--active-remote remote))
     (transmit--write-data data)
     (transmit--modeline-refresh)))
 
@@ -475,18 +472,11 @@ Pass \"none\" to clear."
 
 (defun transmit--setup-modeline ()
   "Add transmit segment to the modeline (idempotent)."
-  (when (fboundp 'doom-modeline-def-segment)
-    (eval
-     '(doom-modeline-def-segment transmit
-        "SFTP status."
-        (transmit--modeline-segment)))
-    ;; Insert our segment into doom's main modeline format
-    (with-eval-after-load 'doom-modeline
-      (doom-modeline-set-modeline 'main)))
-  ;; Always also add to global-mode-string as fallback
-  ;; Use a format string so it's a constant that add-to-list can deduplicate
-  (unless (member 'transmit--modeline-string global-mode-string)
-    (add-to-list 'global-mode-string 'transmit--modeline-string t)))
+  ;; Use an (:eval ...) form so the keymap embedded in the string is always live.
+  ;; Store it under a named variable for deduplication.
+  (unless (member 'transmit--modeline-segment-form global-mode-string)
+    (defvar transmit--modeline-segment-form '(:eval (transmit--modeline-segment)))
+    (add-to-list 'global-mode-string 'transmit--modeline-segment-form t)))
 
 
 ;;;; ---- Queue Popup ----------------------------------------------------------
@@ -1004,19 +994,31 @@ Also starts watching newly-created directories automatically."
     (error (user-error "Transmit: failed to parse config: %s" err)))
   (add-hook 'kill-emacs-hook #'transmit--on-kill-emacs)
   (transmit--setup-modeline)
-  ;; Restore cached server/remote for modeline from persisted last-used
-  (let* ((data   (transmit--read-data))
-         (server (and data (gethash "__last_server__" data)))
-         (remote (and data (gethash "__last_remote__" data))))
-    (when server
-      (setq transmit--active-server server
-            transmit--active-remote remote)))
-  ;; Always render the modeline segment immediately
-  (transmit--modeline-refresh)
-  (let ((cfg (transmit--get-server-config)))
-    (when cfg
-      (when (gethash "upload_on_bufwrite" cfg) (transmit--install-auto-upload))
-      (when (gethash "watch_for_changes"  cfg) (transmit-watch-directory)))))
+  ;; Install auto-upload hook globally
+  (transmit--install-auto-upload)
+  ;; When a file is opened, update modeline and start watching if project has a server
+  (add-hook 'find-file-hook #'transmit--maybe-watch-project)
+  ;; Start with clean state — modeline shows "no server" until a project is opened
+  (setq transmit--active-server nil
+        transmit--active-remote nil)
+  (transmit--modeline-refresh))
+
+(defun transmit--maybe-watch-project ()
+  "When a file is opened, update the active server for the modeline
+and start watching the project if it has a server selected."
+  (when buffer-file-name
+    (let* ((root   (transmit--project-root default-directory))
+           (server (transmit--get-selected-server root))
+           (remote (transmit--get-selected-remote root)))
+      (when server
+        ;; Update modeline to show this project's server
+        (setq transmit--active-server server
+              transmit--active-remote remote)
+        (transmit--modeline-refresh)
+        ;; Start watching if not already watched
+        (unless (gethash root transmit--watchers)
+          (transmit--log 2 (format "Starting watch for project: %s" root))
+          (transmit--watch-dir root))))))
 
 (defun transmit--on-kill-emacs ()
   "Clean up on Emacs exit."
