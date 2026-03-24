@@ -469,24 +469,15 @@ Pass \"none\" to clear."
 
 (defun transmit--setup-modeline ()
   "Add transmit segment to the modeline (idempotent)."
-  (if (fboundp 'doom-modeline-def-segment)
-      ;; Define a doom-modeline segment and add it to the main modeline
-      (progn
-        (eval
-         '(doom-modeline-def-segment transmit
-            "SFTP status and upload progress."
-            (transmit--modeline-segment)))
-        ;; Redefine the main modeline to include our segment on the right side
-        (eval
-         '(doom-modeline-def-modeline 'main
-            '(bar workspace-name window-number modals matches follow buffer-info
-                  remote-host buffer-position word-count parrot selection-info)
-            '(misc-info transmit battery grip irc mu4e gnus debug repl lsp
-                        minor-modes input-method buffer-encoding major-mode
-                        process vcs checker))))
-    ;; Fallback: global-mode-string for non-doom modelines
-    (unless (member 'transmit--modeline-segment-form global-mode-string)
-      (add-to-list 'global-mode-string 'transmit--modeline-segment-form t))))
+  (when (fboundp 'doom-modeline-def-segment)
+    (eval
+     '(doom-modeline-def-segment transmit
+        "SFTP status and upload progress."
+        (transmit--modeline-segment))))
+  ;; global-mode-string is shown by doom-modeline's misc-info segment
+  ;; Use the live (:eval ...) form so the keymap is always active
+  (unless (member 'transmit--modeline-segment-form global-mode-string)
+    (add-to-list 'global-mode-string 'transmit--modeline-segment-form t)))
 
 
 ;;;; ---- Queue Popup ----------------------------------------------------------
