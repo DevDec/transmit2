@@ -1,7 +1,7 @@
 ;;; transmit.el --- SFTP file transfer plugin for Emacs -*- lexical-binding: t -*-
 
 ;; Author: Port of transmit2 (https://github.com/DevDec/transmit2)
-;; Version: 1.2.0
+;; Version: 2.0.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; Keywords: sftp, files, upload, remote
 
@@ -14,7 +14,7 @@
 ;;   bin/transmit-macos    (macOS)
 ;;   bin/transmit-windows.exe  (Windows)
 ;;
-;; Quick start in Doom config.el:
+;; Quick start in init.el:
 ;;
 ;;   (add-to-list 'load-path "~/projects/transmit2.nvim/emacs/")
 ;;   (require 'transmit)
@@ -22,16 +22,17 @@
 ;;   (transmit-setup "~/transmit_sftp/config.json")
 ;;
 ;; Commands:
-;;   M-x transmit-select-server   - Pick server + remote for current directory
-;;   M-x transmit-upload-file     - Upload current buffer's file
-;;   M-x transmit-remove-file     - Remove current buffer's file from remote
-;;   M-x transmit-watch-directory - Watch cwd for changes and auto-upload
-;;   M-x transmit-stop-watching   - Stop all file watchers
-;;   M-x transmit-disconnect      - Close SFTP connection
-;;   M-x transmit-show-queue      - Show the upload queue
-;;   M-x transmit-clear-queue     - Clear pending queue items
-;;   M-x transmit-show-log        - Show the debug log buffer
-;;   M-x transmit-status          - Show connection/queue summary
+;;   M-x transmit-select-server     - Pick server + remote for current project
+;;   M-x transmit-upload-file       - Upload current buffer's file
+;;   M-x transmit-remove-file       - Remove current buffer's file from remote
+;;   M-x transmit-watch-directory   - Watch project root for changes and auto-upload
+;;   M-x transmit-stop-watching     - Stop all file watchers
+;;   M-x transmit-disconnect        - Close SFTP connection
+;;   M-x transmit-show-queue        - Show the upload queue buffer
+;;   M-x transmit-show-queue-popup  - Show floating queue popup (also: click modeline)
+;;   M-x transmit-clear-queue       - Clear pending queue items
+;;   M-x transmit-show-log          - Show the debug log buffer
+;;   M-x transmit-status            - Show connection/queue summary
 
 ;;; Code:
 
@@ -79,16 +80,18 @@
 
 (defcustom transmit-data-file
   (expand-file-name "transmit.json" user-emacs-directory)
-  "Path to the JSON file recording per-directory server selections.
-Compatible with the Neovim transmit2 plugin state file."
+  "Path to the JSON file recording per-project server selections."
   :type 'file :group 'transmit)
 
 (defcustom transmit-binary-path nil
   "Explicit path to the transmit binary.
-When nil the binary is found automatically.
-Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-linux\")"
+When nil the binary is found automatically."
   :type '(choice (const :tag "Auto-detect" nil) file)
   :group 'transmit)
+
+(defcustom transmit-queue-popup-height 12
+  "Height in lines of the queue popup window."
+  :type 'integer :group 'transmit)
 
 
 ;;;; ---- Internal State -------------------------------------------------------
@@ -108,6 +111,30 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
 (defvar transmit--current-progress (list :file nil :percent nil))
 (defvar transmit--watchers (make-hash-table :test 'equal))
 (defvar transmit--auto-upload-hook-installed nil)
+;; Modeline update timer — forces modeline refresh periodically during upload
+(defvar transmit--modeline-timer nil)
+
+
+;;;; ---- Project Root ---------------------------------------------------------
+
+(defun transmit--project-root (&optional dir)
+  "Return the project root for DIR (or `default-directory').
+Uses projectile if available, falls back to `default-directory'."
+  (let ((d (expand-file-name (or dir default-directory))))
+    (or
+     ;; projectile
+     (and (fboundp 'projectile-project-root)
+          (let ((root (ignore-errors (projectile-project-root d))))
+            (and root (not (string= root "")) (expand-file-name root))))
+     ;; built-in project.el
+     (and (fboundp 'project-current)
+          (let ((proj (ignore-errors (project-current nil d))))
+            (and proj (expand-file-name (project-root proj)))))
+     ;; git root fallback
+     (let ((git (locate-dominating-file d ".git")))
+       (and git (expand-file-name git)))
+     ;; last resort
+     d)))
 
 
 ;;;; ---- Logging --------------------------------------------------------------
@@ -156,42 +183,45 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
      (transmit--log 4 (format "Failed to write transmit.json: %s" err) t)
      nil)))
 
-(defun transmit--working-dir-has-selection-p (dir)
-  "Return non-nil if DIR has an active server/remote selection."
-  (let* ((data  (transmit--read-data))
-         (entry (and data (gethash dir data))))
+(defun transmit--working-dir-has-selection-p (&optional dir)
+  "Return non-nil if the project containing DIR has a server selection."
+  (let* ((root  (transmit--project-root dir))
+         (data  (transmit--read-data))
+         (entry (and data (gethash root data))))
     (and entry (gethash "remote" entry))))
 
 (defun transmit--get-selected-server (&optional dir)
-  "Return the server name selected for DIR, or nil."
-  (let* ((cwd   (expand-file-name (or dir default-directory)))
+  "Return the server name selected for the project containing DIR, or nil."
+  (let* ((root  (transmit--project-root dir))
          (data  (transmit--read-data))
-         (entry (and data (gethash cwd data))))
+         (entry (and data (gethash root data))))
     (and entry (gethash "server_name" entry))))
 
 (defun transmit--get-selected-remote (&optional dir)
-  "Return the remote name selected for DIR, or nil."
-  (let* ((cwd   (expand-file-name (or dir default-directory)))
+  "Return the remote name selected for the project containing DIR, or nil."
+  (let* ((root  (transmit--project-root dir))
          (data  (transmit--read-data))
-         (entry (and data (gethash cwd data))))
+         (entry (and data (gethash root data))))
     (and entry (gethash "remote" entry))))
 
 (defun transmit--get-server-config (&optional dir)
-  "Return the server config hash-table for the server selected in DIR."
+  "Return the server config hash-table for the server selected in DIR's project."
   (let ((server (transmit--get-selected-server dir)))
     (and server (gethash server transmit--server-config))))
 
 (defun transmit--update-selection (server-name remote &optional dir)
-  "Record that DIR uses SERVER-NAME / REMOTE.  Pass \"none\" to clear."
-  (let* ((cwd  (expand-file-name (or dir default-directory)))
+  "Record that the project containing DIR uses SERVER-NAME / REMOTE.
+Pass \"none\" to clear."
+  (let* ((root (transmit--project-root dir))
          (data (or (transmit--read-data) (make-hash-table :test 'equal))))
     (if (string= server-name "none")
-        (remhash cwd data)
-      (let ((entry (or (gethash cwd data) (make-hash-table :test 'equal))))
+        (remhash root data)
+      (let ((entry (or (gethash root data) (make-hash-table :test 'equal))))
         (puthash "server_name" server-name entry)
         (puthash "remote"      remote      entry)
-        (puthash cwd entry data)))
-    (transmit--write-data data)))
+        (puthash root entry data)))
+    (transmit--write-data data)
+    (transmit--modeline-refresh)))
 
 
 ;;;; ---- Binary Discovery -----------------------------------------------------
@@ -250,7 +280,7 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
             (cl-return-from transmit--binary-path found))))
 
       (transmit--log 4
-        (format "Binary '%s' not found. Set `transmit-binary-path'." bname) t)
+					 (format "Binary '%s' not found. Set `transmit-binary-path'." bname) t)
       nil)))
 
 
@@ -272,6 +302,7 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
                                :working-dir working-dir
                                :processing nil))))
       (transmit--log 1 (format "Queued [%d]: %s %s" id type filename))
+      (transmit--modeline-refresh)
       (transmit--ensure-connection #'transmit--process-next)
       id)))
 
@@ -281,7 +312,8 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
 
 (defun transmit--dequeue ()
   "Remove the first queue item."
-  (setq transmit--queue (cdr transmit--queue)))
+  (setq transmit--queue (cdr transmit--queue))
+  (transmit--modeline-refresh))
 
 (defun transmit--find-queue-item (id)
   "Return (item . index) for queue item ID, or nil."
@@ -298,39 +330,236 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
   (when transmit--keepalive-timer (cancel-timer transmit--keepalive-timer))
   (setq transmit--keepalive-timer
         (run-with-timer transmit-keepalive-timeout nil
-          (lambda ()
-            (when transmit--process
-              (condition-case nil
-                  (process-send-string transmit--process "exit\n")
-                (error nil))
-              (setq transmit--process          nil
-                    transmit--phase            transmit--phase-init
-                    transmit--connecting       nil
-                    transmit--connection-ready nil)
-              (transmit--log 2 "SFTP closed after inactivity" t))
-            (setq transmit--keepalive-timer nil)))))
+						(lambda ()
+						  (when transmit--process
+							(condition-case nil
+								(process-send-string transmit--process "exit\n")
+							  (error nil))
+							(setq transmit--process          nil
+								  transmit--phase            transmit--phase-init
+								  transmit--connecting       nil
+								  transmit--connection-ready nil)
+							(transmit--log 2 "SFTP closed after inactivity" t))
+						  (setq transmit--keepalive-timer nil)
+						  (transmit--modeline-refresh)))))
 
 (defun transmit--start-auth-timeout ()
   "Start the authentication watchdog timer."
   (when transmit--auth-timeout-timer (cancel-timer transmit--auth-timeout-timer))
   (setq transmit--auth-timeout-timer
         (run-with-timer transmit-auth-timeout nil
-          (lambda ()
-            (when (and transmit--connecting (not transmit--connection-ready))
-              (transmit--log 4 "SFTP authentication timed out" t)
-              (when transmit--process
-                (delete-process transmit--process)
-                (setq transmit--process nil))
-              (setq transmit--phase            transmit--phase-init
-                    transmit--connecting       nil
-                    transmit--connection-ready nil))
-            (setq transmit--auth-timeout-timer nil)))))
+						(lambda ()
+						  (when (and transmit--connecting (not transmit--connection-ready))
+							(transmit--log 4 "SFTP authentication timed out" t)
+							(when transmit--process
+							  (delete-process transmit--process)
+							  (setq transmit--process nil))
+							(setq transmit--phase            transmit--phase-init
+								  transmit--connecting       nil
+								  transmit--connection-ready nil))
+						  (setq transmit--auth-timeout-timer nil)
+						  (transmit--modeline-refresh)))))
 
 (defun transmit--stop-auth-timeout ()
   "Cancel the authentication watchdog timer."
   (when transmit--auth-timeout-timer
     (cancel-timer transmit--auth-timeout-timer)
     (setq transmit--auth-timeout-timer nil)))
+
+(defun transmit--start-modeline-timer ()
+  "Start a repeating timer to refresh the modeline during uploads."
+  (unless transmit--modeline-timer
+    (setq transmit--modeline-timer
+          (run-with-timer 0.5 0.5 #'transmit--modeline-refresh))))
+
+(defun transmit--stop-modeline-timer ()
+  "Stop the modeline refresh timer."
+  (when transmit--modeline-timer
+    (cancel-timer transmit--modeline-timer)
+    (setq transmit--modeline-timer nil)))
+
+
+;;;; ---- Modeline -------------------------------------------------------------
+
+(defun transmit--modeline-refresh ()
+  "Force modeline to redisplay."
+  (force-mode-line-update t))
+
+(defun transmit--modeline-progress-bar (pct width)
+  "Return a progress bar string of WIDTH chars at PCT percent."
+  (let* ((filled (round (* pct (/ width 100.0))))
+         (empty  (- width filled)))
+    (concat "["
+            (make-string filled ?█)
+            (make-string empty ?░)
+            "]")))
+
+(defun transmit--modeline-segment ()
+  "Return a propertized modeline string for the transmit status.
+Shows server→remote when idle, progress bar when uploading.
+Click to open the queue popup."
+  (when (hash-table-p transmit--server-config)
+    (let* ((server (transmit--get-selected-server))
+           (remote (transmit--get-selected-remote)))
+      (when server
+        (let* ((progress  (transmit-get-progress))
+               (file      (plist-get progress :file))
+               (pct       (or (plist-get progress :percent) 0))
+               (queue-len (length transmit--queue))
+               (map       (make-sparse-keymap)))
+          ;; Click → queue popup
+          (define-key map [mode-line mouse-1] #'transmit-show-queue-popup)
+          (define-key map [mode-line mouse-3] #'transmit-show-queue-popup)
+          (propertize
+           (concat
+            " ⇪ "
+            (propertize (format "%s→%s" server remote)
+                        'face (if transmit--connection-ready
+                                  '(:foreground "#88c0d0" :weight bold)
+                                '(:foreground "#616e88")))
+            (when file
+              (concat
+               " "
+               (propertize
+                (transmit--modeline-progress-bar pct 10)
+                'face '(:foreground "#a3be8c"))
+               (propertize
+                (format " %d%%" pct)
+                'face '(:foreground "#a3be8c" :weight bold))))
+            (when (and (> queue-len 0) (not file))
+              (propertize (format " [%d queued]" queue-len)
+                          'face '(:foreground "#ebcb8b")))
+            " ")
+           'mouse-face 'mode-line-highlight
+           'local-map  map
+           'help-echo  (if file
+                           (format "Uploading: %s (%d%%)\nClick to show queue"
+                                   (file-name-nondirectory file) pct)
+                         (format "SFTP: %s → %s | %d queued\nClick to show queue"
+                                 server remote queue-len))))))))
+
+;; Register with doom-modeline if available, otherwise use global-mode-string
+(defun transmit--setup-modeline ()
+  "Hook the transmit segment into doom-modeline or the standard modeline."
+  (if (fboundp 'doom-modeline-def-segment)
+      (progn
+        (eval
+         '(doom-modeline-def-segment transmit
+            "SFTP server status and upload progress."
+            (transmit--modeline-segment)))
+        ;; Add to the modeline — insert after the major-mode segment
+        (doom-modeline-def-modeline 'transmit-modeline
+          '(bar workspace-name window-number modals matches follow buffer-info
+                remote-host buffer-position word-count parrot selection-info)
+          '(compilation objed-state misc-info transmit persp-name battery
+                        grip irc mu4e gnus github debug repl lsp minor-modes
+                        input-method indent-info buffer-encoding major-mode
+                        process vcs checker time))
+        ;; Activate on all buffers
+        (add-hook 'after-change-major-mode-hook
+                  (lambda ()
+                    (when (doom-modeline-auto-set-modeline)
+                      (doom-modeline-set-modeline 'transmit-modeline)))))
+    ;; Fallback: prepend to global-mode-string for non-doom modelines
+    (add-to-list 'global-mode-string
+                 '(:eval (transmit--modeline-segment)) t)))
+
+
+;;;; ---- Queue Popup ----------------------------------------------------------
+
+(defun transmit-show-queue-popup (&optional _event)
+  "Show a scrollable popup buffer listing the current upload queue."
+  (interactive)
+  (let* ((buf  (get-buffer-create "*transmit-queue*"))
+         (win  (get-buffer-window buf)))
+    ;; If already visible, just focus it
+    (if win
+        (select-window win)
+      (with-current-buffer buf
+        (transmit--render-queue-buffer))
+      (let ((win (display-buffer
+                  buf
+                  `(display-buffer-at-bottom
+                    . ((window-height . ,transmit-queue-popup-height)
+                       (preserve-size . (nil . t)))))))
+        (when win
+          (select-window win))))
+    ;; Set up auto-refresh inside the popup
+    (with-current-buffer buf
+      (setq-local revert-buffer-function
+                  (lambda (_ignore-auto _noconfirm)
+                    (transmit--render-queue-buffer)))
+      ;; q closes the popup
+      (local-set-key (kbd "q")
+                     (lambda ()
+                       (interactive)
+                       (quit-window t)))
+      ;; g refreshes
+      (local-set-key (kbd "g")
+                     (lambda ()
+                       (interactive)
+                       (transmit--render-queue-buffer))))))
+
+(defun transmit--render-queue-buffer ()
+  "Render the queue contents into the current buffer."
+  (let ((inhibit-read-only t)
+        (pos (point)))
+    (erase-buffer)
+    (insert (propertize "⇪ Transmit Upload Queue\n" 'face '(:weight bold :height 1.1)))
+    (insert (propertize (make-string 50 ?─) 'face '(:foreground "#4c566a")))
+    (insert "\n")
+    ;; Connection status
+    (let ((server (transmit--get-selected-server))
+          (remote (transmit--get-selected-remote)))
+      (if server
+          (insert (format "  Server : %s → %s  [%s]\n"
+                          (propertize server 'face '(:foreground "#88c0d0" :weight bold))
+                          (propertize (or remote "?") 'face '(:foreground "#88c0d0"))
+                          (cond (transmit--connection-ready
+                                 (propertize "connected" 'face '(:foreground "#a3be8c")))
+                                (transmit--connecting
+                                 (propertize "connecting…" 'face '(:foreground "#ebcb8b")))
+                                (t (propertize "disconnected" 'face '(:foreground "#bf616a"))))))
+        (insert (propertize "  No server selected for this project\n"
+                            'face '(:foreground "#616e88")))))
+    (insert "\n")
+    ;; Current upload progress
+    (let* ((progress (transmit-get-progress))
+           (file     (plist-get progress :file))
+           (pct      (or (plist-get progress :percent) 0)))
+      (when file
+        (insert (propertize "  Uploading now:\n" 'face '(:foreground "#ebcb8b")))
+        (insert (format "  %s\n" (propertize (file-name-nondirectory file)
+                                             'face '(:foreground "#eceff4"))))
+        (insert (format "  %s %d%%\n\n"
+                        (propertize (transmit--modeline-progress-bar pct 30)
+                                    'face '(:foreground "#a3be8c"))
+                        pct))))
+    ;; Queue
+    (let ((pending (cl-remove-if (lambda (i) (plist-get i :processing)) transmit--queue)))
+      (if (null pending)
+          (insert (propertize "  Queue is empty.\n" 'face '(:foreground "#616e88")))
+        (insert (propertize (format "  Queued (%d):\n" (length pending))
+                            'face '(:foreground "#ebcb8b")))
+        (cl-loop for item in pending
+                 for i from 1
+                 do (insert
+                     (format "  %2d. [%s] %s\n"
+                             i
+                             (propertize (plist-get item :type) 'face '(:foreground "#81a1c1"))
+                             (propertize (file-name-nondirectory (plist-get item :filename))
+                                         'face '(:foreground "#d8dee9")))))))
+    (insert "\n")
+    (insert (propertize "  q: close  g: refresh\n" 'face '(:foreground "#4c566a")))
+    (goto-char (min pos (point-max)))))
+
+;; Auto-refresh the queue buffer whenever the queue changes
+(defun transmit--maybe-refresh-queue-buffer ()
+  "If the queue popup is visible, refresh it."
+  (when-let ((buf (get-buffer "*transmit-queue*")))
+    (when (get-buffer-window buf)
+      (with-current-buffer buf
+        (transmit--render-queue-buffer)))))
 
 
 ;;;; ---- Process: command dispatch --------------------------------------------
@@ -344,7 +573,8 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
                (filename (plist-get item :filename))
                (cfg      (transmit--get-server-config cwd))
                (data     (transmit--read-data))
-               (entry    (and data (gethash cwd data)))
+               (root     (transmit--project-root cwd))
+               (entry    (and data (gethash root data)))
                (rname    (and entry (gethash "remote" entry)))
                (remotes  (and cfg (gethash "remotes" cfg)))
                (rbase    (and remotes rname (gethash rname remotes))))
@@ -352,24 +582,19 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
             (transmit--log 4 (format "No remote configured for %s" cwd) t)
             (transmit--dequeue)
             (cl-return-from transmit--process-next nil))
-          (let* ((relative    (file-relative-name filename cwd))
+          (let* ((relative    (file-relative-name filename root))
                  (remote-path (concat rbase "/" relative))
                  (cmd (cl-case (intern (plist-get item :type))
                         (upload (format "upload %s %s\n" filename remote-path))
                         (remove (format "remove %s\n"    remote-path)))))
             (when cmd
               (plist-put item :processing t)
+              (transmit--start-modeline-timer)
               (transmit--log 1 (format "Sending: %s" (string-trim cmd)))
               (process-send-string transmit--process cmd))))))))
 
 
 ;;;; ---- Process: output filter -----------------------------------------------
-;;
-;; The binary uses prompts that end with ": " (no newline) during the
-;; handshake phase, then switches to newline-terminated response lines once
-;; connected.  We handle both:
-;;   - Incomplete buffer: scanned for prompt patterns after every chunk.
-;;   - Complete lines (\n-terminated): processed for PROGRESS/success/failure.
 
 (defun transmit--send (proc text)
   "Send TEXT to PROC and log it at DEBUG level."
@@ -381,21 +606,18 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
   (let ((buf transmit--process-buf)
         (creds (and cfg (gethash "credentials" cfg))))
     (cond
-     ;; hostname prompt
      ((and (string= transmit--phase transmit--phase-init)
            (string-match-p "Enter SSH hostname" buf))
       (transmit--send proc (concat (gethash "host" creds) "\n"))
       (setq transmit--phase transmit--phase-username)
       (setq transmit--process-buf ""))
 
-     ;; username prompt
      ((and (string= transmit--phase transmit--phase-username)
            (string-match-p "Enter SSH username" buf))
       (transmit--send proc (concat (gethash "username" creds) "\n"))
       (setq transmit--phase transmit--phase-auth-method)
       (setq transmit--process-buf ""))
 
-     ;; auth method prompt
      ((and (string= transmit--phase transmit--phase-auth-method)
            (string-match-p "Authentication method" buf))
       (let ((auth-type (or (gethash "auth_type" creds) "key")))
@@ -406,14 +628,12 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
                 transmit--phase-key))
         (setq transmit--process-buf "")))
 
-     ;; password prompt
      ((and (string= transmit--phase transmit--phase-password)
            (string-match-p "Enter password" buf))
       (transmit--send proc (concat (gethash "password" creds) "\n"))
       (setq transmit--phase transmit--phase-ready)
       (setq transmit--process-buf ""))
 
-     ;; private key prompt
      ((and (string= transmit--phase transmit--phase-key)
            (string-match-p "Enter path to private key" buf))
       (transmit--send proc (concat (expand-file-name (gethash "identity_file" creds)) "\n"))
@@ -424,7 +644,6 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
   "Handle a complete newline-terminated LINE from the binary."
   (transmit--log 1 (format "< %s" line))
   (cond
-   ;; Connected confirmation
    ((and (string= transmit--phase transmit--phase-ready)
          (string-match-p "Connected to" line))
     (setq transmit--phase           transmit--phase-active
@@ -432,20 +651,21 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
           transmit--connection-ready t)
     (transmit--stop-auth-timeout)
     (transmit--log 2 "SFTP connection established" t)
+    (transmit--modeline-refresh)
     (when transmit--pending-callback
       (let ((cb transmit--pending-callback))
         (setq transmit--pending-callback nil)
         (funcall cb))))
 
-   ;; Active: progress update
    ((and (string= transmit--phase transmit--phase-active)
          (string-match "^PROGRESS|\\(.*\\)|\\([0-9]+\\)$" line))
     (let ((file (match-string 1 line))
           (pct  (string-to-number (match-string 2 line))))
       (when (and file (>= pct 0) (<= pct 100))
-        (setq transmit--current-progress (list :file file :percent pct)))))
+        (setq transmit--current-progress (list :file file :percent pct))
+        (transmit--modeline-refresh)
+        (transmit--maybe-refresh-queue-buffer))))
 
-   ;; Active: operation complete (success or failure)
    ((and (string= transmit--phase transmit--phase-active)
          (or (string-match-p "^1|Upload succeeded"  line)
              (string-match-p "^1|Remove succeeded"  line)
@@ -458,18 +678,19 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
         (transmit--dequeue)
         (setq transmit--current-progress (list :file nil :percent nil))
         (transmit--reset-keepalive)
+        (transmit--maybe-refresh-queue-buffer)
         (if transmit--queue
             (transmit--process-next)
+          (transmit--stop-modeline-timer)
+          (transmit--modeline-refresh)
           (message "Transmit: All transfers complete")))))))
 
 (defun transmit--filter (proc string)
   "Accumulate output STRING from PROC and drive the state machine."
   (setq transmit--process-buf (concat transmit--process-buf string))
   (let ((cfg (transmit--get-server-config)))
-    ;; During handshake, check the buffer for prompts (no newline required)
     (unless (string= transmit--phase transmit--phase-active)
       (transmit--check-prompt proc cfg))
-    ;; Process all complete newline-terminated lines
     (while (string-match "\n" transmit--process-buf)
       (let* ((pos  (match-beginning 0))
              (line (substring transmit--process-buf 0 pos)))
@@ -488,6 +709,8 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
         transmit--connecting       nil
         transmit--current-progress (list :file nil :percent nil))
   (transmit--stop-auth-timeout)
+  (transmit--stop-modeline-timer)
+  (transmit--modeline-refresh)
   (unless transmit--is-exiting
     (transmit--log 3 "SFTP connection lost, reconnecting..." t)
     (dolist (item transmit--queue)
@@ -501,12 +724,10 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
   "Ensure an SFTP connection is live, then call CALLBACK."
   (cl-block transmit--ensure-connection
     (cond
-     ;; Already connected
      ((and transmit--process transmit--connection-ready)
       (when callback (funcall callback))
       (transmit--reset-keepalive))
 
-     ;; Already connecting — store callback
      (transmit--connecting
       (when callback
         (let ((prev transmit--pending-callback))
@@ -515,11 +736,10 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
                     (lambda () (funcall prev) (funcall callback))
                   callback)))))
 
-     ;; Start a new connection
      (t
       (let ((cfg (transmit--get-server-config)))
         (unless cfg
-          (transmit--log 4 "No SFTP server configured for current directory" t)
+          (transmit--log 4 "No SFTP server configured for current project" t)
           (cl-return-from transmit--ensure-connection nil))
         (let ((binary (transmit--binary-path)))
           (unless binary
@@ -529,10 +749,10 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
                 transmit--process-buf      ""
                 transmit--pending-callback callback)
           (transmit--start-auth-timeout)
+          (transmit--modeline-refresh)
           (transmit--log 2
-            (format "Connecting to %s..."
-                    (gethash "host" (gethash "credentials" cfg))) t)
-          ;; Use a PTY so the binary flushes its prompts immediately
+						 (format "Connecting to %s..."
+								 (gethash "host" (gethash "credentials" cfg))) t)
           (setq transmit--process
                 (make-process
                  :name            "transmit"
@@ -555,15 +775,39 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
 ;;;; ---- File watching --------------------------------------------------------
 
 (defun transmit--watch-callback (event)
-  "Handle filenotify EVENT."
+  "Handle filenotify EVENT.
+Also starts watching newly-created directories automatically."
   (let* ((action (nth 1 event))
          (file   (nth 2 event)))
     (when (and file (not (transmit--excluded-p file)))
       (cond
+       ;; Newly created: if it's a directory, start watching it too
+       ((eq action 'created)
+        (if (file-directory-p file)
+            ;; New directory — add watchers for it and its children
+            (let ((root (transmit--find-watch-root file)))
+              (when root
+                (let* ((tbl   (gethash root transmit--watchers))
+                       (subdirs (transmit--list-subdirs file)))
+                  (dolist (dir subdirs)
+                    (unless (or (transmit--excluded-p dir) (gethash dir tbl))
+                      (condition-case err
+                          (puthash dir
+                                   (file-notify-add-watch
+                                    dir '(change) #'transmit--watch-callback)
+                                   tbl)
+                        (error (transmit--log 3 (format "Could not watch %s: %s"
+                                                        dir err)))))))))
+          ;; New regular file — upload it
+          (when (file-regular-p file)
+            (let ((root (transmit--find-watch-root file)))
+              (when root (transmit--enqueue "upload" file root))))))
+
        ((eq action 'deleted)
         (let ((root (transmit--find-watch-root file)))
           (when root (transmit--enqueue "remove" file root))))
-       ((memq action '(created changed))
+
+       ((eq action 'changed)
         (when (and (file-regular-p file) (not (transmit--excluded-p file)))
           (let ((root (transmit--find-watch-root file)))
             (when root (transmit--enqueue "upload" file root)))))))))
@@ -635,40 +879,40 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
 (defun transmit--upload (file &optional working-dir)
   "Queue FILE for upload.  Returns queue-item ID or nil."
   (cl-block transmit--upload
-    (let* ((f   (or file (buffer-file-name)))
-           (cwd (expand-file-name (or working-dir default-directory))))
+    (let* ((f    (or file (buffer-file-name)))
+           (root (transmit--project-root (or working-dir default-directory))))
       (unless f
         (message "Transmit: buffer has no associated file")
         (cl-return-from transmit--upload nil))
       (unless (file-regular-p f)
         (message "Transmit: not a regular file: %s" f)
         (cl-return-from transmit--upload nil))
-      (unless (transmit--working-dir-has-selection-p cwd)
-        (message "Transmit: no server configured for %s" cwd)
+      (unless (transmit--working-dir-has-selection-p root)
+        (message "Transmit: no server configured for project %s" root)
         (cl-return-from transmit--upload nil))
-      (transmit--enqueue "upload" (expand-file-name f) cwd))))
+      (transmit--enqueue "upload" (expand-file-name f) root))))
 
 (defun transmit--remove (file &optional working-dir)
   "Queue FILE for remote removal.  Returns queue-item ID or nil."
   (cl-block transmit--remove
-    (let* ((f   (or file (buffer-file-name)))
-           (cwd (expand-file-name (or working-dir default-directory))))
+    (let* ((f    (or file (buffer-file-name)))
+           (root (transmit--project-root (or working-dir default-directory))))
       (unless f
         (message "Transmit: buffer has no associated file")
         (cl-return-from transmit--remove nil))
-      (unless (transmit--working-dir-has-selection-p cwd)
-        (message "Transmit: no server configured for %s" cwd)
+      (unless (transmit--working-dir-has-selection-p root)
+        (message "Transmit: no server configured for project %s" root)
         (cl-return-from transmit--remove nil))
-      (transmit--enqueue "remove" (expand-file-name f) cwd))))
+      (transmit--enqueue "remove" (expand-file-name f) root))))
 
 
 ;;;; ---- Auto-upload on save --------------------------------------------------
 
 (defun transmit--after-save-hook ()
-  "Upload the saved buffer if its directory has a server selected."
+  "Upload the saved buffer if its project has a server selected."
   (when (and buffer-file-name
              (transmit--working-dir-has-selection-p
-              (expand-file-name default-directory)))
+              (transmit--project-root default-directory)))
     (transmit--upload buffer-file-name default-directory)))
 
 
@@ -706,10 +950,11 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
           (clrhash transmit--server-config)
           (maphash (lambda (k v) (puthash k v transmit--server-config)) parsed)
           (transmit--log 2
-            (format "Loaded %d server(s) from %s"
-                    (hash-table-count transmit--server-config) config-location) t)))
+						 (format "Loaded %d server(s) from %s"
+								 (hash-table-count transmit--server-config) config-location) t)))
     (error (user-error "Transmit: failed to parse config: %s" err)))
   (add-hook 'kill-emacs-hook #'transmit--on-kill-emacs)
+  (transmit--setup-modeline)
   (let ((cfg (transmit--get-server-config)))
     (when cfg
       (when (gethash "upload_on_bufwrite" cfg) (transmit--install-auto-upload))
@@ -719,6 +964,7 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
   "Clean up on Emacs exit."
   (setq transmit--is-exiting t)
   (transmit--stop-watching)
+  (transmit--stop-modeline-timer)
   (when transmit--process
     (condition-case nil
         (process-send-string transmit--process "exit\n")
@@ -741,29 +987,37 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
 
 ;;;###autoload
 (defun transmit-select-server ()
-  "Interactively pick a server and remote for the current project directory."
+  "Interactively pick a server and remote for the current project.
+The selection is remembered per project root and persisted to disk."
   (interactive)
-  (let ((servers (transmit--server-names)))
+  (let ((servers (transmit--server-names))
+        (root    (transmit--project-root)))
     (unless servers (user-error "Transmit: no servers configured"))
-    (let* ((choice (completing-read
-                    (format "Transmit server [%s]: "
-                            (or (transmit--get-selected-server) "none"))
-                    (cons "none" servers) nil t))
-           (cwd (expand-file-name default-directory)))
+    (let* ((current-server (transmit--get-selected-server))
+           (current-remote (transmit--get-selected-remote))
+           (choice (completing-read
+                    (format "Transmit server for %s [current: %s]: "
+                            (abbreviate-file-name root)
+                            (if current-server
+                                (format "%s→%s" current-server current-remote)
+                              "none"))
+                    (cons "none" servers) nil t)))
       (if (string= choice "none")
           (progn
-            (transmit--update-selection "none" nil cwd)
-            (message "Transmit: cleared server selection for %s" cwd))
+            (transmit--update-selection "none" nil)
+            (message "Transmit: cleared server selection for %s"
+                     (abbreviate-file-name root)))
         (let ((remotes (transmit--remote-names choice)))
           (unless remotes
             (user-error "Transmit: no remotes defined for server '%s'" choice))
           (let ((remote (completing-read
                          (format "Remote for %s: " choice) remotes nil t)))
-            (transmit--update-selection choice remote cwd)
-            (message "Transmit: %s -> %s" choice remote)
+            (transmit--update-selection choice remote)
+            (message "Transmit: project %s → %s / %s"
+                     (abbreviate-file-name root) choice remote)
+            ;; Install auto-upload hook for this project
+            (transmit--install-auto-upload)
             (let ((cfg (gethash choice transmit--server-config)))
-              (when (and cfg (gethash "upload_on_bufwrite" cfg))
-                (transmit--install-auto-upload))
               (when (and cfg (gethash "watch_for_changes" cfg))
                 (transmit-watch-directory)))))))))
 
@@ -781,18 +1035,20 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
 
 ;;;###autoload
 (defun transmit-watch-directory (&optional dir)
-  "Watch DIR (default: current directory) for changes and auto-upload."
+  "Watch the project root (or DIR) for changes and auto-upload.
+Newly created files and directories are automatically watched."
   (interactive)
-  (let* ((root (expand-file-name (or dir default-directory)))
+  (let* ((root (transmit--project-root dir))
          (cfg  (transmit--get-server-config root)))
-    (unless cfg (user-error "Transmit: no server configured for %s" root))
+    (unless cfg (user-error "Transmit: no server configured for project %s" root))
     (transmit--watch-dir root)))
 
 ;;;###autoload
 (defun transmit-stop-watching (&optional dir)
-  "Stop watching DIR, or all directories if DIR is nil."
+  "Stop watching DIR's project, or all directories if DIR is nil."
   (interactive)
-  (let ((n (transmit--stop-watching (and dir (expand-file-name dir)))))
+  (let* ((root (and dir (transmit--project-root dir)))
+         (n    (transmit--stop-watching root)))
     (message "Transmit: removed %d watcher%s" n (if (= n 1) "" "s"))))
 
 ;;;###autoload
@@ -807,20 +1063,9 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
 
 ;;;###autoload
 (defun transmit-show-queue ()
-  "Display the current upload queue."
+  "Display the upload queue in a dedicated buffer."
   (interactive)
-  (if (null transmit--queue)
-      (message "Transmit: queue is empty")
-    (with-output-to-temp-buffer "*transmit-queue*"
-      (princ (format "%-6s %-8s %-12s %s\n" "ID" "STATUS" "TYPE" "FILE"))
-      (princ (make-string 72 ?-))
-      (princ "\n")
-      (dolist (item transmit--queue)
-        (princ (format "%-6d %-8s %-12s %s\n"
-                       (plist-get item :id)
-                       (if (plist-get item :processing) "ACTIVE" "pending")
-                       (plist-get item :type)
-                       (file-name-nondirectory (plist-get item :filename))))))))
+  (transmit-show-queue-popup))
 
 ;;;###autoload
 (defun transmit-clear-queue ()
@@ -831,6 +1076,8 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
           (cl-remove-if-not (lambda (i) (plist-get i :processing))
                             transmit--queue))
     (let ((n (- before (length transmit--queue))))
+      (transmit--modeline-refresh)
+      (transmit--maybe-refresh-queue-buffer)
       (message "Transmit: cleared %d item%s" n (if (= n 1) "" "s")))))
 
 ;;;###autoload
@@ -846,6 +1093,8 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
           (setq transmit--queue
                 (cl-remove-if (lambda (i) (= (plist-get i :id) id))
                               transmit--queue))
+          (transmit--modeline-refresh)
+          (transmit--maybe-refresh-queue-buffer)
           (message "Transmit: cancelled item %d (%s)" id
                    (file-name-nondirectory (plist-get item :filename))))))))
 
@@ -869,7 +1118,8 @@ Example: (setq transmit-binary-path \"~/projects/transmit2.nvim/bin/transmit-lin
 (defun transmit-status ()
   "Show a one-line connection/queue summary."
   (interactive)
-  (message "Transmit: %s -> %s | %s | queue: %d"
+  (message "Transmit: project=%s  server=%s → %s  status=%s  queue=%d"
+           (abbreviate-file-name (transmit--project-root))
            (or (transmit--get-selected-server) "none")
            (or (transmit--get-selected-remote) "none")
            (cond (transmit--connection-ready "connected")
