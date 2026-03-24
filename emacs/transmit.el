@@ -413,67 +413,69 @@ Pass \"none\" to clear."
 ;;;; ---- Modeline -------------------------------------------------------------
 
 (defun transmit--modeline-refresh ()
-  "Force modeline to redisplay."
+  "Rebuild cached modeline string and force redisplay."
+  (transmit--update-modeline-string)
   (force-mode-line-update t))
 
 (defun transmit--modeline-progress-bar (pct width)
-  "Return a progress bar string of WIDTH chars at PCT percent."
-  (let* ((filled (round (* pct (/ width 100.0))))
-         (empty  (- width filled)))
-    (concat "["
-            (make-string filled ?█)
-            (make-string empty ?░)
-            "]")))
+(defvar transmit--modeline-string nil
+  "Cached modeline string, updated whenever state changes.")
+
+(defun transmit--update-modeline-string ()
+  "Recompute and cache the modeline string."
+  (setq transmit--modeline-string
+        (when transmit--active-server
+          (let* ((progress  (transmit-get-progress))
+                 (file      (plist-get progress :file))
+                 (pct       (or (plist-get progress :percent) 0))
+                 (queue-len (length transmit--queue))
+                 (map       (make-sparse-keymap)))
+            (define-key map [mode-line mouse-1] #'transmit-show-queue-popup)
+            (define-key map [mode-line mouse-3] #'transmit-show-queue-popup)
+            (propertize
+             (concat
+              " ⇪ "
+              (propertize
+               (format "%s→%s" transmit--active-server transmit--active-remote)
+               'face (if transmit--connection-ready
+                         '(:foreground "#88c0d0" :weight bold)
+                       '(:foreground "#616e88")))
+              (when file
+                (concat
+                 " "
+                 (propertize (transmit--modeline-progress-bar pct 10)
+                             'face '(:foreground "#a3be8c"))
+                 (propertize (format " %d%%" pct)
+                             'face '(:foreground "#a3be8c" :weight bold))))
+              (when (and (> queue-len 0) (not file))
+                (propertize (format " [%d]" queue-len)
+                            'face '(:foreground "#ebcb8b")))
+              " ")
+             'mouse-face 'mode-line-highlight
+             'local-map  map
+             'help-echo  (format "SFTP: %s → %s | %d queued\nClick to show queue"
+                                 transmit--active-server
+                                 transmit--active-remote
+                                 queue-len))))))
 
 (defun transmit--modeline-segment ()
-  "Return a propertized modeline string for the transmit status.
-Uses cached server/remote so it persists across all buffers.
-Click to open the queue popup."
-  (when transmit--active-server
-    (let* ((progress  (transmit-get-progress))
-           (file      (plist-get progress :file))
-           (pct       (or (plist-get progress :percent) 0))
-           (queue-len (length transmit--queue))
-           (map       (make-sparse-keymap)))
-      (define-key map [mode-line mouse-1] #'transmit-show-queue-popup)
-      (define-key map [mode-line mouse-3] #'transmit-show-queue-popup)
-      (propertize
-       (concat
-        " ⇪ "
-        (propertize (format "%s→%s" transmit--active-server transmit--active-remote)
-                    'face (if transmit--connection-ready
-                              '(:foreground "#88c0d0" :weight bold)
-                            '(:foreground "#616e88")))
-        (when file
-          (concat
-           " "
-           (propertize
-            (transmit--modeline-progress-bar pct 10)
-            'face '(:foreground "#a3be8c"))
-           (propertize
-            (format " %d%%" pct)
-            'face '(:foreground "#a3be8c" :weight bold))))
-        (when (and (> queue-len 0) (not file))
-          (propertize (format " [%d queued]" queue-len)
-                      'face '(:foreground "#ebcb8b")))
-        " ")
-       'mouse-face 'mode-line-highlight
-       'local-map  map
-       'help-echo  (if file
-                       (format "Uploading: %s (%d%%)\nClick to show queue"
-                               (file-name-nondirectory file) pct)
-                     (format "SFTP: %s → %s | %d queued\nClick to show queue"
-                             transmit--active-server
-                             transmit--active-remote
-                             queue-len))))))
-;; Register with doom-modeline if available, otherwise use global-mode-string
-(defvar transmit--modeline-string '(:eval (transmit--modeline-segment))
-  "The modeline entry — stored as a named variable so add-to-list deduplicates.")
+  "Return the cached transmit modeline string."
+  transmit--modeline-string)
 
 (defun transmit--setup-modeline ()
-  "Hook the transmit segment into the modeline (idempotent)."
-  ;; Use a named var so add-to-list can detect it's already present
-  (add-to-list 'global-mode-string 'transmit--modeline-string t))
+  "Add transmit segment to the modeline (idempotent)."
+  (when (fboundp 'doom-modeline-def-segment)
+    (eval
+     '(doom-modeline-def-segment transmit
+        "SFTP status."
+        (transmit--modeline-segment)))
+    ;; Insert our segment into doom's main modeline format
+    (with-eval-after-load 'doom-modeline
+      (doom-modeline-set-modeline 'main)))
+  ;; Always also add to global-mode-string as fallback
+  ;; Use a format string so it's a constant that add-to-list can deduplicate
+  (unless (member 'transmit--modeline-string global-mode-string)
+    (add-to-list 'global-mode-string 'transmit--modeline-string t)))
 
 
 ;;;; ---- Queue Popup ----------------------------------------------------------
