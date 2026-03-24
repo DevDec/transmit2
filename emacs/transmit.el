@@ -432,39 +432,42 @@ Pass \"none\" to clear."
 (defun transmit--update-modeline-string ()
   "Recompute and cache the modeline string."
   (setq transmit--modeline-string
-        (when transmit--active-server
-          (let* ((progress  (transmit-get-progress))
-                 (file      (plist-get progress :file))
-                 (pct       (or (plist-get progress :percent) 0))
-                 (queue-len (length transmit--queue))
-                 (map       (make-sparse-keymap)))
-            (define-key map [mode-line mouse-1] #'transmit-show-queue-popup)
-            (define-key map [mode-line mouse-3] #'transmit-show-queue-popup)
-            (propertize
-             (concat
-              " ⇪ "
-              (propertize
-               (format "%s→%s" transmit--active-server transmit--active-remote)
-               'face (if transmit--connection-ready
-                         '(:foreground "#88c0d0" :weight bold)
-                       '(:foreground "#616e88")))
-              (when file
-                (concat
-                 " "
-                 (propertize (transmit--modeline-progress-bar pct 10)
-                             'face '(:foreground "#a3be8c"))
-                 (propertize (format " %d%%" pct)
-                             'face '(:foreground "#a3be8c" :weight bold))))
-              (when (and (> queue-len 0) (not file))
-                (propertize (format " [%d]" queue-len)
-                            'face '(:foreground "#ebcb8b")))
-              " ")
-             'mouse-face 'mode-line-highlight
-             'local-map  map
-             'help-echo  (format "SFTP: %s → %s | %d queued\nClick to show queue"
-                                 transmit--active-server
-                                 transmit--active-remote
-                                 queue-len))))))
+        (let* ((progress  (transmit-get-progress))
+               (file      (plist-get progress :file))
+               (pct       (or (plist-get progress :percent) 0))
+               (queue-len (length transmit--queue))
+               (map       (make-sparse-keymap)))
+          (define-key map [mode-line mouse-1] #'transmit-show-queue-popup)
+          (define-key map [mode-line mouse-3] #'transmit-show-queue-popup)
+          (propertize
+           (concat
+            " ⇪ "
+            (if transmit--active-server
+                (propertize
+                 (format "%s→%s" transmit--active-server transmit--active-remote)
+                 'face (if transmit--connection-ready
+                           '(:foreground "#88c0d0" :weight bold)
+                         '(:foreground "#616e88")))
+              (propertize "no server" 'face '(:foreground "#4c566a")))
+            (when file
+              (concat
+               " "
+               (propertize (transmit--modeline-progress-bar pct 10)
+                           'face '(:foreground "#a3be8c"))
+               (propertize (format " %d%%" pct)
+                           'face '(:foreground "#a3be8c" :weight bold))))
+            (when (and (> queue-len 0) (not file))
+              (propertize (format " [%d]" queue-len)
+                          'face '(:foreground "#ebcb8b")))
+            " ")
+           'mouse-face 'mode-line-highlight
+           'local-map  map
+           'help-echo  (if transmit--active-server
+                           (format "SFTP: %s → %s | %d queued\nClick to show queue"
+                                   transmit--active-server
+                                   transmit--active-remote
+                                   queue-len)
+                         "SFTP: no server selected\nClick to configure")))))
 
 (defun transmit--modeline-segment ()
   "Return the cached transmit modeline string."
@@ -932,8 +935,8 @@ Also starts watching newly-created directories automatically."
 
 ;;;; ---- Auto-upload on save --------------------------------------------------
 
-(defvar transmit--save-in-progress nil
-  "Non-nil while we are already handling an after-save-hook to prevent re-entrancy.")
+(defvar-local transmit--save-in-progress nil
+  "Buffer-local flag to prevent re-entrant after-save-hook calls.")
 
 (defun transmit--debounce-file (file)
   "Mark FILE as recently uploaded for 2 seconds to suppress watcher dupes."
@@ -950,16 +953,16 @@ Also starts watching newly-created directories automatically."
              (not transmit--save-in-progress)
              (transmit--working-dir-has-selection-p
               (transmit--project-root default-directory)))
-    (let ((transmit--save-in-progress t)
-          (file (expand-file-name buffer-file-name))
-          (root (transmit--project-root default-directory)))
-      ;; Deduplicate: don't queue if already queued for this file
-      (unless (cl-some (lambda (item)
-                         (string= (plist-get item :filename) file))
-                       transmit--queue)
-        ;; Mark as recently saved so file watcher ignores this event
-        (transmit--debounce-file file)
-        (transmit--enqueue "upload" file root)))))
+    (setq transmit--save-in-progress t)
+    (unwind-protect
+        (let ((file (expand-file-name buffer-file-name))
+              (root (transmit--project-root default-directory)))
+          (unless (cl-some (lambda (item)
+                             (string= (plist-get item :filename) file))
+                           transmit--queue)
+            (transmit--debounce-file file)
+            (transmit--enqueue "upload" file root)))
+      (setq transmit--save-in-progress nil))))
 
 
 ;;;; ---- Server / remote selection UI ----------------------------------------
@@ -1007,8 +1010,9 @@ Also starts watching newly-created directories automatically."
          (remote (and data (gethash "__last_remote__" data))))
     (when server
       (setq transmit--active-server server
-            transmit--active-remote remote)
-      (transmit--modeline-refresh)))
+            transmit--active-remote remote)))
+  ;; Always render the modeline segment immediately
+  (transmit--modeline-refresh)
   (let ((cfg (transmit--get-server-config)))
     (when cfg
       (when (gethash "upload_on_bufwrite" cfg) (transmit--install-auto-upload))
