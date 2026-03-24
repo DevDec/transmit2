@@ -474,10 +474,10 @@ Pass \"none\" to clear."
      '(doom-modeline-def-segment transmit
         "SFTP status and upload progress."
         (transmit--modeline-segment))))
-  ;; global-mode-string is shown by doom-modeline's misc-info segment
-  ;; Use the live (:eval ...) form so the keymap is always active
-  (unless (member 'transmit--modeline-segment-form global-mode-string)
-    (add-to-list 'global-mode-string 'transmit--modeline-segment-form t)))
+  ;; Wrap in (t ...) to match doom-modeline's misc-info format
+  (let ((entry '(t (:eval (transmit--modeline-segment)))))
+    (unless (member entry global-mode-string)
+      (add-to-list 'global-mode-string entry t))))
 
 
 ;;;; ---- Queue Popup ----------------------------------------------------------
