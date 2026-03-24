@@ -418,6 +418,14 @@ Pass \"none\" to clear."
   (force-mode-line-update t))
 
 (defun transmit--modeline-progress-bar (pct width)
+  "Return a progress bar string of WIDTH chars at PCT percent."
+  (let* ((filled (round (* pct (/ width 100.0))))
+         (empty  (- width filled)))
+    (concat "["
+            (make-string filled ?█)
+            (make-string empty ?░)
+            "]")))
+
 (defvar transmit--modeline-string nil
   "Cached modeline string, updated whenever state changes.")
 
