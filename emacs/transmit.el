@@ -790,7 +790,10 @@ Pass \"none\" to clear."
                   callback)))))
 
      (t
-      (let ((cfg (transmit--get-server-config)))
+      (let* ((head (transmit--queue-head))
+             (cfg  (if head
+                       (transmit--get-server-config (plist-get head :working-dir))
+                     (transmit--get-server-config))))
         (unless cfg
           (transmit--log 4 "No SFTP server configured for current project" t)
           (cl-return-from transmit--ensure-connection nil))
