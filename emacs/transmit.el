@@ -670,8 +670,9 @@ Click to open the queue popup."
         (setq transmit--current-progress (list :file nil :percent nil))
         (transmit--reset-keepalive)
         (transmit--maybe-refresh-queue-buffer)
+        ;; Always try to process next regardless of queue length check
         (if transmit--queue
-            (transmit--process-next)
+            (run-at-time 0.05 nil #'transmit--process-next)
           (transmit--stop-modeline-timer)
           (transmit--modeline-refresh)
           (message "Transmit: All transfers complete")))))))
@@ -899,12 +900,23 @@ Also starts watching newly-created directories automatically."
 
 ;;;; ---- Auto-upload on save --------------------------------------------------
 
+(defvar transmit--save-in-progress nil
+  "Non-nil while we are already handling an after-save-hook to prevent re-entrancy.")
+
 (defun transmit--after-save-hook ()
   "Upload the saved buffer if its project has a server selected."
   (when (and buffer-file-name
+             (not transmit--save-in-progress)
              (transmit--working-dir-has-selection-p
               (transmit--project-root default-directory)))
-    (transmit--upload buffer-file-name default-directory)))
+    (let ((transmit--save-in-progress t)
+          (file (expand-file-name buffer-file-name))
+          (root (transmit--project-root default-directory)))
+      ;; Deduplicate: don't queue if already queued for this file
+      (unless (cl-some (lambda (item)
+                         (string= (plist-get item :filename) file))
+                       transmit--queue)
+        (transmit--enqueue "upload" file root)))))
 
 
 ;;;; ---- Server / remote selection UI ----------------------------------------
