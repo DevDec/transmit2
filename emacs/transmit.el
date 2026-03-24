@@ -1225,6 +1225,9 @@ Use this when uploads have stalled but you want to keep queued files."
                  (length transmit--queue)
                  (if (= (length transmit--queue) 1) "" "s")))
     (message "Transmit: queue is empty")))
+
+;;;###autoload
+(defun transmit-reset ()
   "Fully reset transmit state — clears queue, kills process, resets all flags.
 Use this when the queue is stuck or the process is in a bad state."
   (interactive)
