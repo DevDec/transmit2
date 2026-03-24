@@ -1200,6 +1200,50 @@ Newly created files and directories are automatically watched."
       (message "Transmit: cleared %d item%s" n (if (= n 1) "" "s")))))
 
 ;;;###autoload
+(defun transmit-upload-modified ()
+  "Upload all git-modified files in the current project.
+Fetches the list of modified/added/untracked files via git and queues
+them all for upload."
+  (interactive)
+  (let* ((root (transmit--project-root))
+         (cfg  (transmit--get-server-config root)))
+    (unless cfg
+      (user-error "Transmit: no server configured for project %s" root))
+    (let* ((output (shell-command-to-string
+                    (format "git -C %s status --porcelain"
+                            (shell-quote-argument root))))
+           (lines  (split-string output "\n" t))
+           (files  (cl-loop for line in lines
+                            ;; git status --porcelain format: XY filename
+                            ;; Handle renames: "R old -> new"
+                            for parts = (split-string (string-trim line))
+                            for status = (car parts)
+                            for file = (car (last parts))
+                            collect (cons status (expand-file-name file root)))))
+      (if (null files)
+          (message "Transmit: no modified files found in %s"
+                   (abbreviate-file-name root))
+        (let ((count 0))
+          (dolist (pair files)
+            (let ((status (car pair))
+                  (file   (cdr pair)))
+              (cond
+               ;; Deleted — queue a remove on the remote
+               ((string-match-p "^D" status)
+                (transmit--enqueue "remove" file root)
+                (cl-incf count))
+               ;; Modified/added/renamed — queue an upload
+               ((file-regular-p file)
+                (transmit--debounce-file file)
+                (transmit--enqueue "upload" file root)
+                (cl-incf count)))))
+          (message "Transmit: queued %d file%s (%d deleted)"
+                   count
+                   (if (= count 1) "" "s")
+                   (cl-count-if (lambda (p) (string-match-p "^D" (car p)))
+                                files)))))))
+
+;;;###autoload
 (defun transmit-retry ()
   "Unstick and reprocess the queue without clearing it.
 Use this when uploads have stalled but you want to keep queued files."
