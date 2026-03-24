@@ -1,1198 +1,1214 @@
-;;; transmit.el --- SFTP file transfer plugin for Emacs -*- lexical-binding: t -*-
+;;; init.el --- Emacs configuration for Neovim users
+;;; A full-featured IDE config with Evil, LSP, Treesitter, Magit, and more.
 
-;; Author: Port of transmit2 (https://github.com/DevDec/transmit2)
-;; Version: 2.0.0
-;; Package-Requires: ((emacs "27.1"))
-;; Keywords: sftp, files, upload, remote
+;;; ============================================================
+;;; SECTION 1: BOOTSTRAP — straight.el + use-package
+;;; ============================================================
 
-;;; Commentary:
+;; Silence native-comp warnings
+(setq native-comp-async-report-warnings-errors nil)
+(setq byte-compile-warnings '(not obsolete))
+
+;; Don't recurse into submodules when cloning — some repos have broken submodule refs
+(setq straight-vc-git-default-clone-depth 1)
+(setq straight-vc-git-submodule-recurse nil)
+
+;; Bootstrap straight.el (replaces package.el with reproducible installs)
+(defvar bootstrap-version)
+(let ((bootstrap-file
+       (expand-file-name
+        "straight/repos/straight.el/bootstrap.el"
+        (or (bound-and-true-p straight-base-dir)
+            user-emacs-directory)))
+      (bootstrap-version 7))
+  (unless (file-exists-p bootstrap-file)
+    (with-current-buffer
+        (url-retrieve-synchronously
+         "https://raw.githubusercontent.com/radian-software/straight.el/develop/install.el"
+         'silent 'inhibit-cookies)
+      (goto-char (point-max))
+      (eval-print-last-sexp)))
+  (load bootstrap-file nil 'nomessage))
+
+;; Install use-package via straight and make it the default
+(straight-use-package 'use-package)
+(setq straight-use-package-by-default t)
+(setq use-package-always-demand t) ; eager load unless :defer t is specified
+
+
+;;; ============================================================
+;;; SECTION 2: CORE EMACS SETTINGS
+;;; ============================================================
+
+(use-package emacs
+  :straight nil
+  :config
+  ;; Disable file locking — avoids lock file prompts in single-user setups
+  (setq create-lockfiles nil)
+
+  ;; Clean UI
+  (menu-bar-mode -1)
+  (tool-bar-mode -1)
+  (scroll-bar-mode -1)
+  (setq inhibit-startup-screen t)
+  (setq initial-scratch-message nil)
+
+  ;; Sane defaults
+  (setq-default
+   tab-width 4
+   indent-tabs-mode t          ; use tabs, not spaces
+   fill-column 100)
+
+  ;; Relative line numbers (like Neovim)
+  (global-display-line-numbers-mode t)
+  (setq display-line-numbers-type 'relative)
+
+  ;; Syntax highlighting everywhere
+  (global-font-lock-mode t)
+
+  ;; Highlight current line
+  (global-hl-line-mode t)
+
+  ;; Show matching parens
+  (show-paren-mode t)
+  (setq show-paren-delay 0)
+
+  ;; Smoother scrolling
+  (setq scroll-margin 8
+        scroll-conservatively 101
+        scroll-preserve-screen-position t)
+
+  ;; Keep backup/auto-save files out of the way
+  (setq backup-directory-alist `(("." . ,(expand-file-name "backups" user-emacs-directory)))
+        auto-save-file-name-transforms `((".*" ,(expand-file-name "auto-saves/" user-emacs-directory) t)))
+  (make-directory (expand-file-name "auto-saves" user-emacs-directory) t)
+
+  ;; UTF-8 everywhere
+  (set-language-environment "UTF-8")
+  (prefer-coding-system 'utf-8)
+
+  ;; Font — change "JetBrains Mono" to any font you have installed
+  (set-face-attribute 'default nil :family "JetBrains Mono" :height 140)
+  (set-face-attribute 'fixed-pitch nil :family "JetBrains Mono" :height 140))
+
+
+;;; ============================================================
+;;; SECTION 3: THEME
+;;; ============================================================
+
+(use-package doom-themes
+  :config
+  (load-theme 'doom-nord t))
+
+
+;;; ============================================================
+;;; SECTION 4: EVIL MODE (Vim keybindings)
+;;; ============================================================
+
+(use-package evil
+  :init
+  ;; Required before evil loads
+  (setq evil-want-integration t)
+  (setq evil-want-keybinding nil)  ; evil-collection handles this
+  (setq evil-want-C-u-scroll t)    ; C-u scrolls up like Vim
+  (setq evil-want-C-i-jump t)
+  (setq evil-undo-system 'undo-redo) ; Use Emacs 28+ undo-redo
+  (setq evil-respect-visual-line-mode t)
+  :config
+  (evil-mode 1)
+  ;; Make C-g act like <Escape>
+  (define-key evil-insert-state-map (kbd "C-g") 'evil-normal-state)
+  ;; Keep visual selection after indenting
+  (define-key evil-visual-state-map (kbd ">") (kbd ">gv"))
+  (define-key evil-visual-state-map (kbd "<") (kbd "<gv")))
+
+;; Evil bindings for many built-in and popular modes
+(use-package evil-collection
+  :after evil
+  :config
+  (evil-collection-init))
+
+;; Surround operator: ys, cs, ds like vim-surround
+(use-package evil-surround
+  :after evil
+  :config
+  (global-evil-surround-mode 1))
+
+;; Commentary: gc operator like vim-commentary
+(use-package evil-commentary
+  :after evil
+  :config
+  (evil-commentary-mode))
+
+;; Text objects: ii, ai, iI etc.
+(use-package evil-indent-plus
+  :after evil
+  :config
+  (evil-indent-plus-default-bindings))
+
+
+;;; ============================================================
+;;; SECTION 5: GENERAL.EL — Leader key & keybindings
+;;; ============================================================
+
+(use-package general
+  :config
+  (general-evil-setup t)
+
+  ;; SPC as leader (like Neovim/LazyVim/Doom)
+  (general-create-definer leader-key
+    :states '(normal visual emacs)
+    :keymaps 'override
+    :prefix "SPC")
+
+  ;; Local leader: SPC m (for mode-specific bindings)
+  (general-create-definer local-leader-key
+    :states '(normal visual emacs)
+    :keymaps 'override
+    :prefix "SPC m")
+
+  (leader-key
+    ;; Top-level
+    "SPC" '(execute-extended-command :wk "M-x")
+    ";"   '(eval-expression :wk "Eval expression")
+    "u"   '(universal-argument :wk "Universal arg")
+    "q"   '(:ignore t :wk "quit")
+    "qq"  '(save-buffers-kill-terminal :wk "Quit Emacs")
+    "qr"  '(restart-emacs :wk "Restart Emacs")
+
+    ;; Buffers
+    "b"   '(:ignore t :wk "buffer")
+    "bb"  '(consult-buffer :wk "Switch buffer")
+    "bd"  '(kill-current-buffer :wk "Delete buffer")
+    "bn"  '(next-buffer :wk "Next buffer")
+    "bp"  '(previous-buffer :wk "Prev buffer")
+    "bs"  '(save-buffer :wk "Save buffer")
+    "bS"  '(save-some-buffers :wk "Save all buffers")
+
+    ;; Files
+    "f"   '(:ignore t :wk "file")
+    "ff"  '(find-file :wk "Find file")
+    "fr"  '(consult-recent-file :wk "Recent files")
+    "fs"  '(save-buffer :wk "Save file")
+
+    ;; Windows
+    "w"   '(:ignore t :wk "window")
+    "ww"  '(other-window :wk "Other window")
+    "wd"  '(delete-window :wk "Delete window")
+    "wo"  '(delete-other-windows :wk "Delete other windows")
+    "ws"  '(split-window-below :wk "Split horizontal")
+    "wv"  '(split-window-right :wk "Split vertical")
+    "wh"  '(windmove-left :wk "Focus left")
+    "wl"  '(windmove-right :wk "Focus right")
+    "wk"  '(windmove-up :wk "Focus up")
+    "wj"  '(windmove-down :wk "Focus down")
+
+    ;; Project (Projectile)
+    "p"   '(:ignore t :wk "project")
+    "pp"  '(projectile-switch-project :wk "Switch project")
+    "pf"  '(projectile-find-file :wk "Find file in project")
+    "pr"  '(projectile-recentf :wk "Recent project files")
+    "pk"  '(projectile-kill-buffers :wk "Kill project buffers")
+    "pa"  '(projectile-add-known-project :wk "Add project")
+
+    ;; Search
+    "s"   '(:ignore t :wk "search")
+    "ss"  '(consult-line :wk "Search in buffer")
+    "sS"  '(consult-line-multi :wk "Search all buffers")
+    "sp"  '(consult-ripgrep :wk "Ripgrep in project")
+    "sP"  '(projectile-ripgrep :wk "Ripgrep (projectile)")
+    "sf"  '(consult-find :wk "Find file by name")
+    "si"  '(consult-imenu :wk "Imenu (symbols)")
+    "sI"  '(consult-imenu-multi :wk "Imenu all buffers")
+    "sd"  '(deadgrep :wk "Deadgrep (interactive rg)")
+
+    ;; Find & Replace across project
+    "r"   '(:ignore t :wk "replace")
+    "rr"  '(anzu-query-replace :wk "Replace in buffer")
+    "rR"  '(anzu-query-replace-regexp :wk "Regexp replace in buffer")
+    "rp"  '(projectile-replace :wk "Replace in project")
+    "rP"  '(projectile-replace-regexp :wk "Regexp replace in project")
+
+    ;; LSP
+    "l"   '(:ignore t :wk "lsp")
+    "la"  '(lsp-execute-code-action :wk "Code action")
+    "ld"  '(lsp-find-definition :wk "Find definition")
+    "lD"  '(lsp-find-references :wk "Find references")
+    "li"  '(lsp-find-implementation :wk "Find implementation")
+    "lt"  '(lsp-find-type-definition :wk "Find type")
+    "lh"  '(lsp-ui-doc-glance :wk "Hover docs")
+    "lr"  '(lsp-rename :wk "Rename symbol")
+    "ls"  '(consult-lsp-symbols :wk "Workspace symbols")
+    "lf"  '(lsp-format-buffer :wk "Format buffer")
+    "lF"  '(lsp-format-region :wk "Format region")
+    "lx"  '(lsp-workspace-restart :wk "Restart LSP")
+    "lX"  '(lsp-workspace-shutdown :wk "Shutdown LSP")
+    "le"  '(lsp-ui-flycheck-list :wk "Errors list")
+    "lj"  '(lsp-ui-peek-find-definitions :wk "Peek definition")
+    "lk"  '(lsp-ui-peek-find-references :wk "Peek references")
+
+    ;; Diagnostics
+    "e"   '(:ignore t :wk "errors")
+    "en"  '(flymake-goto-next-error :wk "Next error")
+    "ep"  '(flymake-goto-prev-error :wk "Prev error")
+    "el"  '(consult-flymake :wk "List errors")
+
+    ;; Git (Magit)
+    "g"   '(:ignore t :wk "git")
+    "gg"  '(magit-status :wk "Magit status")
+    "gb"  '(magit-blame :wk "Blame")
+    "gl"  '(magit-log-current :wk "Log")
+    "gL"  '(magit-log-all :wk "Log all")
+    "gc"  '(magit-commit :wk "Commit")
+    "gC"  '(magit-clone :wk "Clone")
+    "gd"  '(magit-diff :wk "Diff")
+    "gD"  '(magit-diff-buffer-file :wk "Diff file")
+    "gf"  '(magit-fetch :wk "Fetch")
+    "gF"  '(magit-pull :wk "Pull")
+    "gp"  '(magit-push :wk "Push")
+    "gs"  '(magit-stage-file :wk "Stage file")
+    "gS"  '(magit-stage-modified :wk "Stage all modified")
+    "gt"  '(git-timemachine :wk "Git timemachine")
+    "ghr" '(diff-hl-revert-hunk :wk "Revert hunk")
+    "ghn" '(diff-hl-next-hunk :wk "Next hunk")
+    "ghp" '(diff-hl-previous-hunk :wk "Prev hunk")
+    "ghd" '(diff-hl-diff-goto-hunk :wk "Diff hunk")
+
+    ;; Multicursor
+    "c"   '(:ignore t :wk "cursor")
+    "cn"  '(evil-mc-make-and-goto-next-match :wk "Add cursor next match")
+    "cp"  '(evil-mc-make-and-goto-prev-match :wk "Add cursor prev match")
+    "ca"  '(evil-mc-make-all-cursors :wk "Add cursors all matches")
+    "cq"  '(evil-mc-undo-all-cursors :wk "Remove all cursors")
+    "cs"  '(evil-mc-skip-and-goto-next-match :wk "Skip & next match")
+
+    ;; Jump (avy)
+    "j"   '(:ignore t :wk "jump")
+    "jj"  '(avy-goto-char-timer :wk "Jump to char")
+    "jl"  '(avy-goto-line :wk "Jump to line")
+    "jw"  '(avy-goto-word-0 :wk "Jump to word")
+    "js"  '(avy-goto-symbol-1 :wk "Jump to symbol")
+
+    ;; Open (terminals, popups etc.)
+    "o"   '(:ignore t :wk "open")
+    "ot"  '(vterm-toggle :wk "Toggle terminal")
+    "oT"  '(vterm :wk "New terminal")
+    "op"  '(popper-toggle :wk "Toggle popup")
+    "oP"  '(popper-cycle :wk "Cycle popups")
+    "of"  '(treemacs :wk "File tree")
+
+    ;; Workspaces (perspective)
+    "TAB"   '(:ignore t :wk "workspace")
+    "TAB TAB" '(persp-switch :wk "Switch/create workspace")
+    "TAB n"   '(persp-next :wk "Next workspace")
+    "TAB p"   '(persp-prev :wk "Prev workspace")
+    "TAB d"   '(persp-kill :wk "Delete workspace")
+    "TAB r"   '(persp-rename :wk "Rename workspace")
+    "TAB N"   '(my/new-workspace :wk "New named workspace")
+    "TAB 1"   '((lambda () (interactive) (persp-switch-by-number 1)) :wk "Workspace 1")
+    "TAB 2"   '((lambda () (interactive) (persp-switch-by-number 2)) :wk "Workspace 2")
+    "TAB 3"   '((lambda () (interactive) (persp-switch-by-number 3)) :wk "Workspace 3")
+    "TAB 4"   '((lambda () (interactive) (persp-switch-by-number 4)) :wk "Workspace 4")
+    "TAB 5"   '((lambda () (interactive) (persp-switch-by-number 5)) :wk "Workspace 5")
+
+    ;; Transmit SFTP
+    "T"   '(:ignore t :wk "transmit/sftp")
+    "Ts"  '(transmit-select-server :wk "Select server")
+    "Tu"  '(transmit-upload-file :wk "Upload file")
+    "Td"  '(transmit-remove-file :wk "Remove remote file")
+    "Tw"  '(transmit-watch-directory :wk "Watch project")
+    "TW"  '(transmit-stop-watching :wk "Stop watching")
+    "Tq"  '(transmit-show-queue-popup :wk "Show queue")
+    "Tc"  '(transmit-clear-queue :wk "Clear queue")
+    "Tl"  '(transmit-show-log :wk "Show log")
+    "Tx"  '(transmit-disconnect :wk "Disconnect")
+    "T?"  '(transmit-status :wk "Status")
+    "tl"  '(display-line-numbers-mode :wk "Line numbers")
+    "tw"  '(whitespace-mode :wk "Whitespace")
+    "ts"  '(flyspell-mode :wk "Spell check")
+    "ti"  '(lsp-ui-imenu :wk "LSP imenu sidebar")
+    "tf"  '(treemacs :wk "File tree")
+    "tz"  '(olivetti-mode :wk "Zen / focus mode")
+    "tS"  '(string-inflection-all-cycle :wk "Cycle case (camel/snake/etc)")))
+
+
+;;; ============================================================
+;;; SECTION 6: WHICH-KEY — keybinding discovery
+;;; ============================================================
+
+(use-package which-key
+  :config
+  (which-key-mode)
+  (setq which-key-idle-delay 0.3
+        which-key-min-display-lines 5))
+
+
+;;; ============================================================
+;;; SECTION 7: COMPLETION — Vertico + Orderless + Marginalia + Consult
+;;; ============================================================
+
+;; Vertical completion UI (like fzf popup)
+(use-package vertico
+  :config
+  (vertico-mode)
+  (setq vertico-count 15
+        vertico-cycle t))
+
+;; Fuzzy/flex matching
+(use-package orderless
+  :config
+  (setq completion-styles '(orderless basic)
+        completion-category-overrides
+        '((file (styles basic partial-completion))
+          ;; Use basic + initials for LSP so orderless doesn't interfere
+          (lsp-capf (styles basic initials)))))
+
+;; Rich annotations in minibuffer
+(use-package marginalia
+  :config
+  (marginalia-mode))
+
+;; Practical completion commands (consult-ripgrep, consult-line, etc.)
+(use-package consult
+  :defer t
+  :bind
+  (:map evil-normal-state-map
+        ("g/" . consult-line))
+  :config
+  (setq consult-async-min-input 2))
+
+;; Embark for contextual actions on completions
+(use-package embark
+  :defer t)
+
+(use-package embark-consult
+  :after (embark consult)
+  :hook (embark-collect-mode . consult-preview-at-point-mode))
+
+;; LSP symbol search via consult
+(use-package consult-lsp
+  :after (consult lsp-mode)
+  :defer t)
+
+;; Corfu: in-buffer completion popup (like nvim-cmp)
+(use-package corfu
+  :hook
+  (lsp-managed-mode . corfu-mode)  ; enable in any LSP buffer
+  :config
+  (setq corfu-auto t
+        corfu-auto-delay 0.3
+        corfu-auto-prefix 2
+        corfu-cycle t
+        corfu-quit-no-match 'separator
+        corfu-on-exact-match nil)
+  (global-corfu-mode)
+  (define-key corfu-map (kbd "TAB") 'corfu-next)
+  (define-key corfu-map (kbd "<backtab>") 'corfu-previous)
+  (define-key corfu-map (kbd "RET") 'corfu-insert))
+
+;; Completion-at-point extensions (gives more sources to corfu)
+(use-package cape
+  :config
+  (add-to-list 'completion-at-point-functions #'cape-file)
+  (add-to-list 'completion-at-point-functions #'cape-dabbrev)
+  (advice-add #'lsp-completion-at-point :around #'cape-wrap-nonexclusive)
+  ;; lsp-request-while-no-input cancels completion requests when you type.
+  ;; Override it to use a normal blocking request instead.
+  (with-eval-after-load 'lsp-mode
+    (advice-add #'lsp-request-while-no-input
+                :override #'lsp-request)))
+
+
+;;; ============================================================
+;;; SECTION 8: YASNIPPET
+;;; ============================================================
+
+(use-package yasnippet
+  :config
+  (yas-global-mode 1))
+
+(use-package yasnippet-snippets
+  :after yasnippet)
+
+
+;;; ============================================================
+;;; SECTION 9: TREESITTER
+;;; ============================================================
+
+;; treesit-auto: installs grammars and maps major modes automatically
+(use-package treesit-auto
+  :config
+  (setq treesit-auto-install 'prompt) ; asks before installing grammars
+  (global-treesit-auto-mode))
+
+;; Structural navigation with evil text objects
+(use-package evil-textobj-tree-sitter
+  :after (evil treesit-auto)
+  :config
+  ;; in/around function
+  (define-key evil-outer-text-objects-map "f"
+    (evil-textobj-tree-sitter-get-textobj "function.outer"))
+  (define-key evil-inner-text-objects-map "f"
+    (evil-textobj-tree-sitter-get-textobj "function.inner"))
+  ;; in/around class
+  (define-key evil-outer-text-objects-map "c"
+    (evil-textobj-tree-sitter-get-textobj "class.outer"))
+  (define-key evil-inner-text-objects-map "c"
+    (evil-textobj-tree-sitter-get-textobj "class.inner"))
+  ;; in/around parameter/argument
+  (define-key evil-outer-text-objects-map "a"
+    (evil-textobj-tree-sitter-get-textobj "parameter.outer"))
+  (define-key evil-inner-text-objects-map "a"
+    (evil-textobj-tree-sitter-get-textobj "parameter.inner")))
+
+
+;;; ============================================================
+;;; SECTION 9: LSP-MODE
+;;; ============================================================
+
+(use-package lsp-mode
+  :hook
+  ((lsp-mode . lsp-enable-which-key-integration)
+   (lsp-managed-mode . (lambda ()
+                          ;; Ensure lsp capf is first in the list
+                          (setq-local completion-at-point-functions
+                                      (list #'lsp-completion-at-point)))))
+  :init
+  (setq lsp-keymap-prefix "C-c l") ; backup prefix (SPC l is the main one)
+  :config
+  (setq lsp-idle-delay 0.2
+        lsp-log-io nil
+        lsp-completion-provider :none
+        lsp-completion-enable t
+        lsp-enable-snippet t          ; yasnippet is now installed
+        lsp-headerline-breadcrumb-enable t
+        lsp-headerline-breadcrumb-segments '(project file symbols)
+        lsp-signature-auto-activate t
+        lsp-signature-render-documentation nil
+        lsp-eldoc-enable-hover t
+        lsp-inlay-hint-enable t
+        lsp-enable-symbol-highlighting t
+        lsp-semantic-tokens-enable t))
+
+;; UI enhancements: sideline diagnostics, peek windows, doc popups
+(use-package lsp-ui
+  :after lsp-mode
+  :config
+  (setq lsp-ui-doc-enable t
+        lsp-ui-doc-position 'at-point
+        lsp-ui-doc-delay 0.5
+        lsp-ui-doc-show-with-cursor nil ; show with SPC l h instead
+        lsp-ui-sideline-enable t
+        lsp-ui-sideline-show-diagnostics t
+        lsp-ui-sideline-show-hover nil
+        lsp-ui-sideline-show-code-actions t
+        lsp-ui-peek-enable t
+        lsp-ui-peek-always-show t))
+
+
+;;; ============================================================
+;;; SECTION 10: LANGUAGE SUPPORT
+;;; ============================================================
+
+;; --- PHP ---
+(use-package php-mode
+  :mode "\\.php\\'")
+
+;; --- JavaScript / TypeScript / TSX ---
+;; These are handled by built-in js-ts-mode, typescript-ts-mode, tsx-ts-mode
+;; (shipped with Emacs 29+). We just set up file associations here.
+(add-to-list 'auto-mode-alist '("\\.js\\'"   . js-ts-mode))
+(add-to-list 'auto-mode-alist '("\\.jsx\\'"  . js-ts-mode))
+(add-to-list 'auto-mode-alist '("\\.ts\\'"   . typescript-ts-mode))
+(add-to-list 'auto-mode-alist '("\\.tsx\\'"  . tsx-ts-mode))
+(add-to-list 'auto-mode-alist '("\\.mjs\\'"  . js-ts-mode))
+(add-to-list 'auto-mode-alist '("\\.cjs\\'"  . js-ts-mode))
+
+;; --- CSS / SCSS ---
+(add-to-list 'auto-mode-alist '("\\.css\\'"  . css-ts-mode))
+(add-to-list 'auto-mode-alist '("\\.scss\\'" . css-ts-mode))
+
+;; Tell vscode-css-language-server to validate SCSS properly
+(with-eval-after-load 'lsp-mode
+  (setq lsp-css-validate t
+        lsp-css-lint-unknown-properties "ignore")
+  ;; Register SCSS with the CSS language server
+  (add-to-list 'lsp-language-id-configuration '(css-ts-mode . "scss"))
+  ;; Disable emmet-ls for CSS/SCSS — emmet-mode handles expansions natively
+  ;; and emmet-ls snippets drown out real css-ls completions
+  (add-to-list 'lsp-disabled-clients '(css-ts-mode . emmet-ls)))
+
+;; --- HTML / Templates ---
+;; web-mode handles embedded languages (PHP+HTML, template engines, etc.)
+(use-package web-mode
+  :mode
+  (("\\.html?\\'"    . web-mode)
+   ("\\.phtml\\'"   . web-mode)
+   ("\\.twig\\'"    . web-mode)
+   ("\\.blade\\.php\\'" . web-mode)
+   ("\\.ejs\\'"     . web-mode)
+   ("\\.hbs\\'"     . web-mode))
+  :config
+  (setq web-mode-markup-indent-offset 2
+        web-mode-css-indent-offset 2
+        web-mode-code-indent-offset 2
+        web-mode-enable-auto-pairing t
+        web-mode-enable-auto-closing t
+        web-mode-enable-current-element-highlight t
+        web-mode-enable-css-colorization t))
+
+;; --- Emmet (fast HTML/CSS expansion, like VSCode Emmet) ---
+(use-package emmet-mode
+  :hook
+  ((web-mode     . emmet-mode)
+   (css-ts-mode  . emmet-mode)
+   (html-mode    . emmet-mode))
+  :config
+  (setq emmet-expand-jsx-className? t))
+
+;; --- JSON ---
+(use-package json-mode
+  :mode "\\.json\\'")
+
+;; --- YAML ---
+(use-package yaml-mode
+  :mode "\\.ya?ml\\'")
+
+;; Prettier via apheleia (configured in Section 31) handles formatting.
+;; prettier-js is NOT used — apheleia is async and won't move your cursor.
+
+
+;;; ============================================================
+;;; SECTION 11: STATUS BAR — doom-modeline
+;;; ============================================================
+
+(use-package doom-modeline
+  :config
+  (doom-modeline-mode 1)
+  (setq doom-modeline-height 28
+        doom-modeline-bar-width 4
+        doom-modeline-icon t                  ; needs nerd-icons fonts
+        doom-modeline-major-mode-icon t
+        doom-modeline-buffer-state-icon t
+        doom-modeline-lsp t                   ; show LSP status
+        doom-modeline-github nil              ; set t if you want GitHub notifs
+        doom-modeline-minor-modes nil
+        doom-modeline-enable-word-count nil
+        doom-modeline-buffer-encoding t
+        doom-modeline-vcs-max-length 20))
+
+;; Required for icons in doom-modeline (run M-x nerd-icons-install-fonts once)
+(use-package nerd-icons)
+
+
+;;; ============================================================
+;;; SECTION 12: MAGIT & GIT
+;;; ============================================================
+
+(use-package magit
+  :defer t
+  :config
+  (setq magit-display-buffer-function #'magit-display-buffer-same-window-except-diff-v1
+        magit-log-auto-more t))
+
+;; Inline diff highlights in the gutter (like gitsigns.nvim)
+(use-package diff-hl
+  :hook
+  ((prog-mode . diff-hl-mode)
+   (magit-pre-refresh  . diff-hl-magit-pre-refresh)
+   (magit-post-refresh . diff-hl-magit-post-refresh))
+  :config
+  (diff-hl-flydiff-mode)
+  ;; Navigate hunks in normal mode
+  (evil-define-key 'normal 'global
+    (kbd "]h") 'diff-hl-next-hunk
+    (kbd "[h") 'diff-hl-previous-hunk))
+
+;; Walk through git history of a file
+(use-package git-timemachine
+  :defer t
+  :hook (git-timemachine-mode . evil-normalize-keymaps)
+  :config
+  ;; Make evil keys work in timemachine buffers
+  (evil-define-key 'normal git-timemachine-mode-map
+    (kbd "n") 'git-timemachine-show-next-revision
+    (kbd "p") 'git-timemachine-show-previous-revision
+    (kbd "q") 'git-timemachine-quit
+    (kbd "b") 'git-timemachine-blame))
+
+
+;;; ============================================================
+;;; SECTION 13: PROJECTILE — project management
+;;; ============================================================
+
+(use-package projectile
+  :config
+  (projectile-mode +1)
+  (setq projectile-completion-system 'auto   ; uses vertico automatically
+        projectile-enable-caching t
+        projectile-indexing-method 'alien)   ; uses fd/git for speed
+  ;; C-p as a secondary shortcut (vim muscle memory)
+  (define-key evil-normal-state-map (kbd "C-p") 'projectile-find-file))
+
+
+;;; ============================================================
+;;; SECTION 14: SEARCH — Ripgrep + Deadgrep
+;;; ============================================================
+
+;; consult-ripgrep handles project-wide search (SPC s p)
+;; deadgrep gives an interactive ripgrep buffer (SPC s d)
+(use-package deadgrep
+  :defer t)
+
+;; wgrep: edit grep/deadgrep results directly and apply to files
+;; This is how you do find-and-replace across the whole project:
+;;   1. SPC s p  → consult-ripgrep  OR  SPC s d → deadgrep
+;;   2. Press e  in the results buffer to enter wgrep-mode
+;;   3. Edit the matches in the buffer like normal text
+;;   4. C-c C-c  to apply all changes to files on disk
+;;   5. C-c C-k  to abort
+(use-package wgrep
+  :config
+  (setq wgrep-auto-save-buffer t))
+
+;; anzu: shows replacement count and preview in query-replace (SPC r r)
+(use-package anzu
+  :config
+  (global-anzu-mode +1)
+  ;; Use SPC r a instead of % so evil's matchit % is preserved
+  (evil-define-key 'normal 'global
+    (kbd "SPC r a") 'anzu-query-replace-at-cursor-thing))
+
+
+;;; ============================================================
+;;; SECTION 15: MULTICURSOR — evil-mc
+;;; ============================================================
+
+;; evil-mc works with visual selection and g-prefixed commands.
 ;;
-;; Emacs port of the transmit2 Neovim plugin.
+;; Quick reference (in normal/visual mode):
+;;   gzm  — make cursors at all matches of word under cursor
+;;   gzn  — make cursor + goto next match
+;;   gzp  — make cursor + goto prev match
+;;   gzA  — make cursor at end of every selected line
+;;   gzI  — make cursor at start of every selected line
+;;   gzu  — undo all cursors
 ;;
-;; Requires the same C binary that ships with transmit2:
-;;   bin/transmit-linux    (Linux)
-;;   bin/transmit-macos    (macOS)
-;;   bin/transmit-windows.exe  (Windows)
+;; SPC c * shortcuts are also configured via leader keys above.
+
+(use-package evil-mc
+  :after evil
+  :config
+  (global-evil-mc-mode 1)
+  (setq evil-mc-cursor-current-evil-cursor 'bar)
+  ;; Escape always quits all cursors
+  (evil-define-key 'normal evil-mc-key-map
+    (kbd "<escape>") 'evil-mc-undo-all-cursors)
+  (evil-define-key '(normal visual) evil-mc-key-map
+    (kbd "gzu") 'evil-mc-undo-all-cursors))
+
+
+;;; ============================================================
+;;; SECTION 16: FILE TREE — Treemacs
+;;; ============================================================
+
+(use-package treemacs
+  :defer t
+  :config
+  (setq treemacs-width 30
+        treemacs-follow-after-init t
+        treemacs-is-never-other-window nil)
+  (treemacs-follow-mode t)
+  (treemacs-filewatch-mode t)
+  (treemacs-git-mode 'deferred))
+
+(use-package treemacs-evil
+  :after (treemacs evil))
+
+(use-package treemacs-projectile
+  :after (treemacs projectile))
+
+(use-package treemacs-nerd-icons
+  :after treemacs)
+
+
+;;; ============================================================
+;;; SECTION 17: SMARTPARENS / AUTOPAIRS
+;;; ============================================================
+
+(use-package smartparens
+  :hook (prog-mode . smartparens-mode)
+  :config
+  (require 'smartparens-config))
+
+
+;;; ============================================================
+;;; SECTION 18: INDENTATION GUIDES
+;;; ============================================================
+
+(use-package indent-bars
+  :straight (indent-bars :type git :host github :repo "jdtsmith/indent-bars")
+  :hook (prog-mode . indent-bars-mode)
+  :config
+  (setq indent-bars-treesit-support t
+        indent-bars-width-frac 0.2
+        indent-bars-pad-frac 0.1))
+
+
+;;; ============================================================
+;;; SECTION 19: RAINBOW DELIMITERS
+;;; ============================================================
+
+(use-package rainbow-delimiters
+  :hook (prog-mode . rainbow-delimiters-mode))
+
+
+;;; ============================================================
+;;; SECTION 20: RESTART-EMACS
+;;; ============================================================
+
+(use-package restart-emacs
+  :defer t)
+
+
+;;; ============================================================
+;;; SECTION 21: ADDITIONAL EVIL KEYBINDINGS (non-leader)
+;;; ============================================================
+
+(with-eval-after-load 'evil
+  ;; Window navigation with C-h/j/k/l in normal mode
+  (define-key evil-normal-state-map (kbd "C-h") 'windmove-left)
+  (define-key evil-normal-state-map (kbd "C-j") 'windmove-down)
+  (define-key evil-normal-state-map (kbd "C-k") 'windmove-up)
+  (define-key evil-normal-state-map (kbd "C-l") 'windmove-right)
+
+  ;; Diagnostic navigation (like ]e [e)
+  (evil-define-key 'normal 'global
+    (kbd "]e") 'flymake-goto-next-error
+    (kbd "[e") 'flymake-goto-prev-error
+    (kbd "]d") 'lsp-ui-peek-jump-forward
+    (kbd "[d") 'lsp-ui-peek-jump-backward
+    ;; LSP hover on K (like Neovim)
+    (kbd "K")  'lsp-ui-doc-glance
+    ;; gd → definition, gr → references, gi → implementation
+    (kbd "gd") 'lsp-find-definition
+    (kbd "gr") 'lsp-find-references
+    (kbd "gi") 'lsp-find-implementation
+    (kbd "gt") 'lsp-find-type-definition
+    ;; Leader-less renames
+    (kbd "g r") 'lsp-rename))
+
+
+;;; ============================================================
+;;; SECTION 22: AVY — jump anywhere on screen
+;;; ============================================================
+
+;; avy lets you jump anywhere visible in 2-3 keystrokes.
+;; Equivalent to flash.nvim / leap.nvim.
 ;;
-;; Quick start in init.el:
+;; Usage:
+;;   SPC j j  → type 1-2 chars, then the hint letter to jump there
+;;   SPC j l  → jump to a line
+;;   SPC j w  → jump to any word start
+;;   gs       → avy-goto-char-timer in normal mode (fastest muscle memory)
+
+(use-package avy
+  :config
+  (setq avy-timeout-seconds 0.3
+        avy-style 'at-full  ; show hints overlaid on text
+        avy-background t)   ; dim rest of buffer during hint
+  ;; gs as a fast normal-mode shortcut (like flash.nvim)
+  (evil-define-key 'normal 'global
+    (kbd "gs") 'avy-goto-char-timer
+    (kbd "gS") 'avy-goto-line))
+
+
+;;; ============================================================
+;;; SECTION 23: VTERM — proper terminal
+;;; ============================================================
+
+;; vterm is a full libvterm-backed terminal, not a toy.
+;; Requires libvterm on your system:
+;;   brew install libvterm cmake    (macOS)
+;;   apt install libvterm-dev cmake (Linux)
+
+(use-package vterm
+  :defer t
+  :config
+  (setq vterm-max-scrollback 10000
+        vterm-kill-buffer-on-exit t))
+
+;; vterm-toggle: toggle a persistent terminal with one key
+(use-package vterm-toggle
+  :after vterm
+  :config
+  (setq vterm-toggle-fullscreen-p nil)
+  ;; Open terminal at the bottom, respecting popper
+  (setq vterm-toggle-scope 'project)
+  (add-to-list 'display-buffer-alist
+               '((lambda (buf _) (with-current-buffer buf (equal major-mode 'vterm-mode)))
+                 (display-buffer-reuse-window display-buffer-at-bottom)
+                 (reusable-frames . visible)
+                 (window-height . 0.3))))
+
+
+;;; ============================================================
+;;; SECTION 24: POPPER — tame popup windows
+;;; ============================================================
+
+;; popper groups transient/popup buffers (terminal, help, errors,
+;; compilation) so they don't clobber your layout.
 ;;
-;;   (add-to-list 'load-path "~/projects/transmit2.nvim/emacs/")
-;;   (require 'transmit)
-;;   (setq transmit-binary-path "~/projects/transmit2.nvim/bin/transmit-linux")
-;;   (transmit-setup "~/transmit_sftp/config.json")
+;; SPC o p  → toggle the last popup
+;; SPC o P  → cycle through popups
+;; Popups open at the bottom at 30% height and can be dismissed instantly.
+
+(use-package popper
+  :config
+  (setq popper-reference-buffers
+        '("\\*Messages\\*"
+          "\\*Warnings\\*"
+          "\\*Compile-Log\\*"
+          "\\*Backtrace\\*"
+          "\\*helpful"
+          "\\*lsp-help\\*"
+          "\\*lsp-diagnostics\\*"
+          flymake-diagnostics-buffer-mode
+          help-mode
+          compilation-mode
+          vterm-mode
+          deadgrep-mode
+          "\\*deadgrep"
+          "\\*ripgrep-search\\*"))
+  (setq popper-window-height 0.3)
+  (popper-mode +1)
+  (popper-echo-mode +1)  ; show popup indicator in modeline
+  ;; Integrate with evil so q closes popups
+  (evil-define-key 'normal popper-mode-map
+    (kbd "q") 'popper-toggle))
+
+
+;;; ============================================================
+;;; SECTION 25: PERSPECTIVE — named workspaces
+;;; ============================================================
+
+;; perspective.el gives you named workspaces, each with their own
+;; isolated buffer list. Think tmux windows but inside Emacs.
 ;;
-;; Commands:
-;;   M-x transmit-select-server     - Pick server + remote for current project
-;;   M-x transmit-upload-file       - Upload current buffer's file
-;;   M-x transmit-remove-file       - Remove current buffer's file from remote
-;;   M-x transmit-watch-directory   - Watch project root for changes and auto-upload
-;;   M-x transmit-stop-watching     - Stop all file watchers
-;;   M-x transmit-disconnect        - Close SFTP connection
-;;   M-x transmit-show-queue        - Show the upload queue buffer
-;;   M-x transmit-show-queue-popup  - Show floating queue popup (also: click modeline)
-;;   M-x transmit-clear-queue       - Clear pending queue items
-;;   M-x transmit-show-log          - Show the debug log buffer
-;;   M-x transmit-status            - Show connection/queue summary
+;; Workflow:
+;;   SPC TAB TAB  → create/switch workspace (type a name)
+;;   SPC TAB n/p  → cycle workspaces
+;;   SPC TAB d    → kill current workspace
+;;   SPC TAB 1-5  → jump to workspace by number
+;;
+;; Tip: create one workspace per project:
+;;   1. SPC TAB TAB → name it "my-project"
+;;   2. SPC p p     → switch to the project inside it
+;;   All buffers for that project stay scoped to that workspace.
 
-;;; Code:
+(use-package perspective
+  :init
+  (setq persp-mode-prefix-key (kbd "C-c M-p"))
+  :config
+  (persp-mode))
 
-(require 'json)
-(require 'filenotify)
-(require 'cl-lib)
+(defun my/new-workspace (name)
+  "Create and switch to a new named workspace."
+  (interactive "sWorkspace name: ")
+  (persp-switch name))
 
-
-;;;; ---- Constants ------------------------------------------------------------
-
-(defconst transmit--phase-init        "init")
-(defconst transmit--phase-username    "username")
-(defconst transmit--phase-auth-method "auth_method")
-(defconst transmit--phase-key         "key")
-(defconst transmit--phase-password    "password")
-(defconst transmit--phase-ready       "ready")
-(defconst transmit--phase-active      "active")
-
-(defconst transmit--excluded-patterns
-  (list "\\.vim\\.bak$" "\\.sw[a-z]$" "\\.tmp$" "\\.git"
-        "node_modules" "__pycache__" "\\.DS_Store$")
-  "Filename patterns excluded from file-watching and uploads.")
-
-
-;;;; ---- Customization --------------------------------------------------------
-
-(defgroup transmit nil
-  "SFTP file transfer plugin."
-  :group 'tools
-  :prefix "transmit-")
-
-(defcustom transmit-keepalive-timeout (* 5 60)
-  "Seconds of inactivity before closing the SFTP connection."
-  :type 'integer :group 'transmit)
-
-(defcustom transmit-auth-timeout 30
-  "Seconds to wait for SFTP authentication before giving up."
-  :type 'integer :group 'transmit)
-
-(defcustom transmit-log-level 2
-  "Minimum log level: 1=DEBUG 2=INFO 3=WARN 4=ERROR."
-  :type '(choice (const :tag "DEBUG" 1) (const :tag "INFO" 2)
-                 (const :tag "WARN" 3)  (const :tag "ERROR" 4))
-  :group 'transmit)
-
-(defcustom transmit-data-file
-  (expand-file-name "transmit.json" user-emacs-directory)
-  "Path to the JSON file recording per-project server selections."
-  :type 'file :group 'transmit)
-
-(defcustom transmit-binary-path nil
-  "Explicit path to the transmit binary.
-When nil the binary is found automatically."
-  :type '(choice (const :tag "Auto-detect" nil) file)
-  :group 'transmit)
-
-(defcustom transmit-queue-popup-height 12
-  "Height in lines of the queue popup window."
-  :type 'integer :group 'transmit)
-
-
-;;;; ---- Internal State -------------------------------------------------------
-
-(defvar transmit--server-config (make-hash-table :test 'equal))
-(defvar transmit--queue '())
-(defvar transmit--next-queue-id 1)
-(defvar transmit--process nil)
-(defvar transmit--process-buf "")
-(defvar transmit--phase transmit--phase-init)
-(defvar transmit--connecting nil)
-(defvar transmit--connection-ready nil)
-(defvar transmit--is-exiting nil)
-(defvar transmit--pending-callback nil)
-(defvar transmit--keepalive-timer nil)
-(defvar transmit--auth-timeout-timer nil)
-(defvar transmit--current-progress (list :file nil :percent nil))
-(defvar transmit--watchers (make-hash-table :test 'equal))
-(defvar transmit--auto-upload-hook-installed nil)
-(defvar transmit--modeline-timer nil)
-;; Cached active server/remote — updated on selection, shown in all buffers
-(defvar transmit--active-server nil)
-(defvar transmit--active-remote nil)
-;; Debounce table: tracks recently-queued files to prevent double-queueing
-(defvar transmit--recent-uploads (make-hash-table :test 'equal))
-
-
-;;;; ---- Project Root ---------------------------------------------------------
-
-(defun transmit--project-root (&optional dir)
-  "Return the project root for DIR (or `default-directory').
-Uses projectile if available, falls back to `default-directory'."
-  (let ((d (expand-file-name (or dir default-directory))))
-    (or
-     ;; projectile
-     (and (fboundp 'projectile-project-root)
-          (let ((root (ignore-errors (projectile-project-root d))))
-            (and root (not (string= root "")) (expand-file-name root))))
-     ;; built-in project.el
-     (and (fboundp 'project-current)
-          (let ((proj (ignore-errors (project-current nil d))))
-            (and proj (expand-file-name (project-root proj)))))
-     ;; git root fallback
-     (let ((git (locate-dominating-file d ".git")))
-       (and git (expand-file-name git)))
-     ;; last resort
-     d)))
-
-
-;;;; ---- Logging --------------------------------------------------------------
-
-(defun transmit--log (level message &optional notify)
-  "Write MESSAGE at log LEVEL to *transmit-log*.  NOTIFY also echoes it."
-  (when (>= level transmit-log-level)
-    (let* ((name (cl-case level (1 "DEBUG") (2 "INFO") (3 "WARN") (4 "ERROR") (t "?")))
-           (line (format "%s [%s] %s\n"
-                         (format-time-string "[%Y-%m-%d %H:%M:%S]") name message)))
-      (with-current-buffer (get-buffer-create "*transmit-log*")
-        (let ((inhibit-read-only t))
-          (goto-char (point-max))
-          (insert line)))))
-  (when notify
-    (message "Transmit [%s]: %s"
-             (cl-case level (1 "DEBUG") (2 "INFO") (3 "WARN") (4 "ERROR") (t "?"))
-             message)))
-
-
-;;;; ---- State-file I/O -------------------------------------------------------
-
-(defun transmit--read-data ()
-  "Return transmit.json as a hash-table, or nil on error."
-  (condition-case err
-      (if (file-exists-p transmit-data-file)
-          (let ((json-object-type 'hash-table)
-                (json-array-type  'list)
-                (json-key-type    'string))
-            (json-read-file transmit-data-file))
-        (let ((tbl (make-hash-table :test 'equal)))
-          (transmit--write-data tbl)
-          tbl))
-    (error
-     (transmit--log 4 (format "Failed to read transmit.json: %s" err) t)
-     nil)))
-
-(defun transmit--write-data (data)
-  "Persist DATA to transmit.json.  Returns non-nil on success."
-  (condition-case err
-      (progn
-        (make-directory (file-name-directory transmit-data-file) t)
-        (with-temp-file transmit-data-file (insert (json-encode data)))
-        t)
-    (error
-     (transmit--log 4 (format "Failed to write transmit.json: %s" err) t)
-     nil)))
-
-(defun transmit--working-dir-has-selection-p (&optional dir)
-  "Return non-nil if the project containing DIR has a server selection."
-  (let* ((root  (transmit--project-root dir))
-         (data  (transmit--read-data))
-         (entry (and data (gethash root data))))
-    (and entry (gethash "remote" entry))))
-
-(defun transmit--get-selected-server (&optional dir)
-  "Return the server name selected for the project containing DIR, or nil."
-  (let* ((root  (transmit--project-root dir))
-         (data  (transmit--read-data))
-         (entry (and data (gethash root data))))
-    (and entry (gethash "server_name" entry))))
-
-(defun transmit--get-selected-remote (&optional dir)
-  "Return the remote name selected for the project containing DIR, or nil."
-  (let* ((root  (transmit--project-root dir))
-         (data  (transmit--read-data))
-         (entry (and data (gethash root data))))
-    (and entry (gethash "remote" entry))))
-
-(defun transmit--get-server-config (&optional dir)
-  "Return the server config hash-table for the server selected in DIR's project."
-  (let ((server (transmit--get-selected-server dir)))
-    (and server (gethash server transmit--server-config))))
-
-(defun transmit--update-selection (server-name remote &optional dir)
-  "Record that the project containing DIR uses SERVER-NAME / REMOTE.
-Pass \"none\" to clear."
-  (let* ((root (transmit--project-root dir))
-         (data (or (transmit--read-data) (make-hash-table :test 'equal))))
-    (if (string= server-name "none")
-        (progn
-          (remhash root data)
-          ;; Clear last-used if it was this server
-          (when (string= transmit--active-server server-name)
-            (setq transmit--active-server nil
-                  transmit--active-remote nil))
-          ;; Update last-used to another project's server if one exists
-          (let ((any (transmit--find-any-selection data)))
-            (when any
-              (setq transmit--active-server (car any)
-                    transmit--active-remote  (cdr any)))))
-      (let ((entry (or (gethash root data) (make-hash-table :test 'equal))))
-        (puthash "server_name" server-name entry)
-        (puthash "remote"      remote      entry)
-        (puthash root entry data))
-      ;; Always cache the most recently selected server globally
-      (setq transmit--active-server server-name
-            transmit--active-remote remote)
-      ;; Persist last-used so we can restore on restart
-      (puthash "__last_server__" server-name data)
-      (puthash "__last_remote__" remote      data))
-    (transmit--write-data data)
-    (transmit--modeline-refresh)))
-
-(defun transmit--find-any-selection (data)
-  "Return (server . remote) for any project in DATA, or nil."
-  (let (result)
-    (maphash (lambda (k v)
-               (unless (or (string-prefix-p "__" k) result)
-                 (let ((s (gethash "server_name" v))
-                       (r (gethash "remote" v)))
-                   (when (and s r) (setq result (cons s r))))))
-             data)
-    result))
-
-
-;;;; ---- Binary Discovery -----------------------------------------------------
-
-(defun transmit--binary-name ()
-  "Return the platform binary filename, or nil."
-  (cond
-   ((eq system-type 'darwin)                        "transmit-macos")
-   ((memq system-type '(gnu gnu/linux gnu/kfreebsd)) "transmit-linux")
-   ((memq system-type '(windows-nt ms-dos cygwin))   "transmit-windows.exe")
-   (t (transmit--log 4 "Unsupported OS" t) nil)))
-
-(defun transmit--try-binary (path)
-  "Return PATH if executable; attempt chmod +x if it exists but is not."
-  (when path
-    (cond
-     ((file-executable-p path) path)
-     ((file-exists-p path)
-      (call-process "chmod" nil nil nil "+x" path)
-      (if (file-executable-p path) path
-        (transmit--log 4 (format "Cannot make executable: %s" path) t)
-        nil))
-     (t nil))))
-
-(defun transmit--binary-path ()
-  "Return path to the transmit binary, or nil."
-  (cl-block transmit--binary-path
-    (let ((bname (transmit--binary-name)))
-      (unless bname
-        (cl-return-from transmit--binary-path nil))
-
-      ;; 1. Explicit override via custom variable
-      (when transmit-binary-path
-        (let ((found (transmit--try-binary (expand-file-name transmit-binary-path))))
-          (when found
-            (cl-return-from transmit--binary-path found))))
-
-      ;; 2. straight.el repos directory
-      (let* ((base (or (bound-and-true-p straight-base-dir)
-                       (expand-file-name ".local" user-emacs-directory)))
-             (path (expand-file-name
-                    (concat "straight/repos/transmit2/bin/" bname) base)))
-        (let ((found (transmit--try-binary path)))
-          (when found
-            (cl-return-from transmit--binary-path found))))
-
-      ;; 3. Relative to this .el file (../../bin/ from emacs/transmit.el)
-      (let* ((this-file (or load-file-name buffer-file-name))
-             (repo-root (and this-file
-                             (expand-file-name
-                              "../../" (file-name-directory this-file))))
-             (path (and repo-root
-                        (expand-file-name (concat "bin/" bname) repo-root))))
-        (let ((found (transmit--try-binary path)))
-          (when found
-            (cl-return-from transmit--binary-path found))))
-
-      (transmit--log 4
-        (format "Binary '%s' not found. Set `transmit-binary-path'." bname) t)
-      nil)))
-
-
-;;;; ---- Queue ----------------------------------------------------------------
-
-(defun transmit--enqueue (type filename working-dir)
-  "Queue a TYPE operation for FILENAME in WORKING-DIR.  Returns ID or nil."
-  (cl-block transmit--enqueue
-    (unless (member type '("upload" "remove"))
-      (transmit--log 4 (format "Invalid operation type: %s" type) t)
-      (cl-return-from transmit--enqueue nil))
-    (let ((id transmit--next-queue-id))
-      (cl-incf transmit--next-queue-id)
-      (setq transmit--queue
-            (nconc transmit--queue
-                   (list (list :id id
-                               :type type
-                               :filename filename
-                               :working-dir working-dir
-                               :processing nil))))
-      (transmit--log 1 (format "Queued [%d]: %s %s" id type filename))
-      (transmit--modeline-refresh)
-      (transmit--ensure-connection #'transmit--process-next)
-      id)))
-
-(defun transmit--queue-head ()
-  "Return the first queue item, or nil."
-  (car transmit--queue))
-
-(defun transmit--dequeue ()
-  "Remove the first queue item."
-  (setq transmit--queue (cdr transmit--queue))
-  (transmit--modeline-refresh))
-
-(defun transmit--find-queue-item (id)
-  "Return (item . index) for queue item ID, or nil."
-  (cl-loop for item in transmit--queue
-           for i from 0
-           when (= (plist-get item :id) id)
-           return (cons item i)))
-
-
-;;;; ---- Timers ---------------------------------------------------------------
-
-(defun transmit--reset-keepalive ()
-  "Restart the idle-disconnect timer."
-  (when transmit--keepalive-timer (cancel-timer transmit--keepalive-timer))
-  (setq transmit--keepalive-timer
-        (run-with-timer transmit-keepalive-timeout nil
+;; Add perspective's buffer source to consult after both are loaded.
+;; We avoid touching consult--source-buffer internals entirely.
+(add-hook 'emacs-startup-hook
           (lambda ()
-            (when transmit--process
-              (condition-case nil
-                  (process-send-string transmit--process "exit\n")
-                (error nil))
-              (setq transmit--process          nil
-                    transmit--phase            transmit--phase-init
-                    transmit--connecting       nil
-                    transmit--connection-ready nil)
-              (transmit--log 2 "SFTP closed after inactivity" t))
-            (setq transmit--keepalive-timer nil)
-            (transmit--modeline-refresh)))))
+            (when (and (featurep 'consult) (featurep 'perspective))
+              (add-to-list 'consult-buffer-sources 'persp-consult-source))))
 
-(defun transmit--start-auth-timeout ()
-  "Start the authentication watchdog timer."
-  (when transmit--auth-timeout-timer (cancel-timer transmit--auth-timeout-timer))
-  (setq transmit--auth-timeout-timer
-        (run-with-timer transmit-auth-timeout nil
+;; Tie projectile projects to perspective workspaces automatically
+(use-package persp-projectile
+  :after (perspective projectile)
+  :config
+  ;; SPC p p now creates/switches a matching perspective
+  (define-key projectile-mode-map (kbd "C-c p") 'projectile-command-map))
+
+
+;;; ============================================================
+;;; SECTION 26: HELPFUL — better help buffers
+;;; ============================================================
+
+;; helpful replaces describe-function / describe-variable etc. with
+;; much richer buffers that show source code, examples, and references.
+
+(use-package helpful
+  :config
+  (setq counsel-describe-function-function #'helpful-callable
+        counsel-describe-variable-function #'helpful-variable)
+  ;; Replace built-in help commands
+  (global-set-key (kbd "C-h f") #'helpful-callable)
+  (global-set-key (kbd "C-h v") #'helpful-variable)
+  (global-set-key (kbd "C-h k") #'helpful-key)
+  (global-set-key (kbd "C-h x") #'helpful-command)
+  ;; Make K in normal mode use helpful for elisp buffers
+  (evil-define-key 'normal emacs-lisp-mode-map
+    (kbd "K") 'helpful-at-point))
+
+
+;;; ============================================================
+;;; SECTION 27: HL-TODO — highlight TODO/FIXME/HACK in comments
+;;; ============================================================
+
+(use-package hl-todo
+  :hook (prog-mode . hl-todo-mode)
+  :config
+  (setq hl-todo-keyword-faces
+        '(("TODO"   . "#FFD700")
+          ("FIXME"  . "#FF4500")
+          ("HACK"   . "#FF8C00")
+          ("NOTE"   . "#00CED1")
+          ("WARN"   . "#FF4500")
+          ("REVIEW" . "#DA70D6")
+          ("DEPRECATED" . "#808080")))
+  ;; Navigate between TODOs
+  (evil-define-key 'normal 'global
+    (kbd "]t") 'hl-todo-next
+    (kbd "[t") 'hl-todo-previous))
+
+
+;;; ============================================================
+;;; SECTION 28: STRING-INFLECTION — cycle word case
+;;; ============================================================
+
+;; Cycle a word through camelCase → snake_case → UPPER_SNAKE → kebab-case
+;; SPC t S  → cycle (configured in leader keys above)
+;; Also available as a text operator below
+
+(use-package string-inflection
+  :defer t)
+
+
+;;; ============================================================
+;;; SECTION 29: EVIL-LION — alignment operator
+;;; ============================================================
+
+;; gl<motion><char>  → align region left on <char>
+;; gL<motion><char>  → align region right on <char>
+;; Example: select lines with foo = 1 / bar = 22 / baz = 333
+;;          gl=  aligns them all on =
+
+(use-package evil-lion
+  :after evil
+  :config
+  (evil-lion-mode))
+
+
+;;; ============================================================
+;;; SECTION 30: OLIVETTI — focused writing / reading mode
+;;; ============================================================
+
+;; Centres the buffer with comfortable margins.
+;; Great for reading long files or writing docs.
+;; SPC t z  → toggle (configured in leader keys above)
+
+(use-package olivetti
+  :defer t
+  :config
+  (setq olivetti-body-width 100))
+
+
+;;; ============================================================
+;;; SECTION 31: WEB / JS EXTRAS
+;;; ============================================================
+
+
+
+;; Run npm scripts from Emacs  (SPC m n in js/ts buffers)
+(use-package npm-mode
+  :hook ((js-ts-mode typescript-ts-mode tsx-ts-mode) . npm-mode))
+
+;; .env file syntax highlighting
+(use-package dotenv-mode
+  :mode "\\.env\\.?.*\\'")
+
+;; apheleia: async formatting — replaces prettier-js for async format-on-save
+;; Doesn't move your cursor or flash the buffer when saving.
+(use-package apheleia
+  :config
+  ;; Tell prettier to use tabs
+  (setf (alist-get 'prettier apheleia-formatters)
+        '("prettier" "--use-tabs" "true" "--tab-width" "4" file))
+  (apheleia-global-mode +1))
+
+
+;;; ============================================================
+;;; SECTION 33: MARKDOWN & MERMAID
+;;; ============================================================
+
+;; markdown-mode: syntax highlighting and structure editing
+(use-package markdown-mode
+  :mode
+  (("\\.md\\'"       . markdown-mode)
+   ("\\.markdown\\'" . markdown-mode)
+   ("README\\.md\\'" . gfm-mode))
+  :hook
+  (markdown-mode . font-lock-mode)
+  (gfm-mode      . font-lock-mode)
+  :config
+  (setq markdown-fontify-code-blocks-natively t
+        markdown-header-scaling t
+        markdown-enable-math t
+        markdown-enable-wiki-links t
+        markdown-italic-underscore t
+        markdown-asymmetric-header t)
+  ;; Ensure font-lock is fully enabled for markdown
+  (add-hook 'markdown-mode-hook #'(lambda () (font-lock-flush) (font-lock-ensure))))
+
+;; grip-mode: live GitHub-flavoured markdown preview in your browser.
+;; Uses GitHub's own renderer via the grip CLI so it looks exactly
+;; like it will on GitHub, including mermaid diagrams.
+;;
+;; Requires:
+;;   pip install grip
+;;   (optionally) set a GitHub token to avoid rate limits:
+;;     M-x customize-variable grip-github-user / grip-github-password
+;;
+;; Usage:
+;;   SPC m g  → start grip preview (opens browser tab, live-reloads on save)
+;;   SPC m G  → stop grip
+(use-package grip-mode
+  :defer t
+  :config
+  (setq grip-preview-use-webkit nil))  ; set t if you want in-Emacs webkit window
+
+;; markdown-mermaid: renders mermaid diagrams inline inside Emacs
+;; by piping fenced ```mermaid blocks through mmdc and showing the
+;; result as an inline image in the buffer.
+;;
+;; Requires:
+;;   npm i -g @mermaid-js/mermaid-cli
+(use-package markdown-mermaid
+  :straight (:host github :repo "pasunboneleve/markdown-mermaid")
+  :after markdown-mode)
+
+(local-leader-key
+  :keymaps '(markdown-mode-map gfm-mode-map)
+  "m"  '(my/markdown-mermaid-preview-right :wk "Preview mermaid diagram"))
+
+(defun my/markdown-mermaid-preview-right ()
+  "Preview mermaid diagram in a vertical split to the right."
+  (interactive)
+  (let ((display-buffer-alist
+         '((".*"
+            (display-buffer-reuse-window display-buffer-in-side-window)
+            (side . right)
+            (window-width . 0.4)))))
+    (markdown-mermaid-preview)))
+
+
+;;; ============================================================
+;;; SECTION 34: PERFORMANCE TUNING
+;;; ============================================================
+
+;; Increase GC threshold during startup, restore after
+(setq gc-cons-threshold (* 128 1024 1024))  ; 128MB during use
+(add-hook 'emacs-startup-hook
+          (lambda () (setq gc-cons-threshold (* 16 1024 1024)))) ; 16MB after
+
+;; Increase read process output for LSP
+(setq read-process-output-max (* 4 1024 1024)) ; 4MB
+
+;; Don't re-render the entire screen on every keypress
+(setq redisplay-dont-pause t)
+
+
+;;; ============================================================
+;;; SECTION 36: TRANSMIT — SFTP file transfer
+;;; ============================================================
+
+;; Loaded directly from the transmit2 GitHub repo via straight.el.
+;; transmit.el lives under emacs/transmit.el in the repo.
+;;
+;; Update these paths to match your setup before uncommenting:
+;; (setq transmit-binary-path "~/projects/transmit2.nvim/bin/transmit-linux")
+;; (transmit-setup "~/transmit_sftp/config.json")
+
+(use-package transmit
+  :straight (:host github
+             :repo "DevDec/transmit2"
+             :files ("emacs/transmit.el")
+             :nonrecursive t)
+  :config
+  (setq transmit-binary-path
+        (expand-file-name "straight/repos/transmit2/bin/transmit-linux"
+                          user-emacs-directory))
+  (transmit-setup "~/transmit_sftp/config.json"))
+;;; ============================================================
+
+;; Install the server:
+;;   npm i -g twig-language-server
+;;
+;; If you prefer Twiggy (more actively maintained but must be built
+;; from source):
+;;   git clone https://github.com/moetelo/twiggy && cd twiggy
+;;   npm install -g pnpm && pnpm install && pnpm build
+;;   then change the :new-connection cmd below to the built binary path
+
+(with-eval-after-load 'lsp-mode
+  (add-to-list 'lsp-language-id-configuration '(web-mode . "twig"))
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection "twig-language-server")
+    :activation-fn (lsp-activate-on "twig")
+    :server-id 'twig-ls)))
+
+(add-hook 'web-mode-hook
           (lambda ()
-            (when (and transmit--connecting (not transmit--connection-ready))
-              (transmit--log 4 "SFTP authentication timed out" t)
-              (when transmit--process
-                (delete-process transmit--process)
-                (setq transmit--process nil))
-              (setq transmit--phase            transmit--phase-init
-                    transmit--connecting       nil
-                    transmit--connection-ready nil))
-            (setq transmit--auth-timeout-timer nil)
-            (transmit--modeline-refresh)))))
-
-(defun transmit--stop-auth-timeout ()
-  "Cancel the authentication watchdog timer."
-  (when transmit--auth-timeout-timer
-    (cancel-timer transmit--auth-timeout-timer)
-    (setq transmit--auth-timeout-timer nil)))
-
-(defun transmit--start-modeline-timer ()
-  "Start a repeating timer to refresh the modeline during uploads."
-  (unless transmit--modeline-timer
-    (setq transmit--modeline-timer
-          (run-with-timer 0.5 0.5 #'transmit--modeline-refresh))))
-
-(defun transmit--stop-modeline-timer ()
-  "Stop the modeline refresh timer."
-  (when transmit--modeline-timer
-    (cancel-timer transmit--modeline-timer)
-    (setq transmit--modeline-timer nil)))
-
-
-;;;; ---- Modeline -------------------------------------------------------------
-
-(defun transmit--modeline-refresh ()
-  "Rebuild cached modeline string and force redisplay."
-  (transmit--update-modeline-string)
-  (force-mode-line-update t))
-
-(defun transmit--modeline-progress-bar (pct width)
-  "Return a progress bar string of WIDTH chars at PCT percent."
-  (let* ((filled (round (* pct (/ width 100.0))))
-         (empty  (- width filled)))
-    (concat "["
-            (make-string filled ?█)
-            (make-string empty ?░)
-            "]")))
-
-(defvar transmit--modeline-string nil
-  "Cached modeline string, updated whenever state changes.")
-
-(defun transmit--update-modeline-string ()
-  "Recompute and cache the modeline string."
-  (setq transmit--modeline-string
-        (let* ((progress  (transmit-get-progress))
-               (file      (plist-get progress :file))
-               (pct       (or (plist-get progress :percent) 0))
-               (queue-len (length transmit--queue))
-               (map       (make-sparse-keymap)))
-          (define-key map [mode-line mouse-1] #'transmit-show-queue-popup)
-          (define-key map [mode-line mouse-3] #'transmit-show-queue-popup)
-          (propertize
-           (concat
-            " ⇪ "
-            (if transmit--active-server
-                (propertize
-                 (format "%s→%s" transmit--active-server transmit--active-remote)
-                 'face (if transmit--connection-ready
-                           '(:foreground "#88c0d0" :weight bold)
-                         '(:foreground "#616e88")))
-              (propertize "no server" 'face '(:foreground "#4c566a")))
-            (when file
-              (concat
-               " "
-               (propertize (transmit--modeline-progress-bar pct 10)
-                           'face '(:foreground "#a3be8c"))
-               (propertize (format " %d%%" pct)
-                           'face '(:foreground "#a3be8c" :weight bold))))
-            (when (and (> queue-len 0) (not file))
-              (propertize (format " [%d]" queue-len)
-                          'face '(:foreground "#ebcb8b")))
-            " ")
-           'mouse-face 'mode-line-highlight
-           'local-map  map
-           'help-echo  (if transmit--active-server
-                           (format "SFTP: %s → %s | %d queued\nClick to show queue"
-                                   transmit--active-server
-                                   transmit--active-remote
-                                   queue-len)
-                         "SFTP: no server selected\nClick to configure")))))
-
-(defun transmit--modeline-segment ()
-  "Return the cached transmit modeline string."
-  transmit--modeline-string)
-
-(defun transmit--setup-modeline ()
-  "Add transmit segment to the modeline (idempotent)."
-  (when (fboundp 'doom-modeline-def-segment)
-    (eval
-     '(doom-modeline-def-segment transmit
-        "SFTP status."
-        (transmit--modeline-segment)))
-    ;; Insert our segment into doom's main modeline format
-    (with-eval-after-load 'doom-modeline
-      (doom-modeline-set-modeline 'main)))
-  ;; Always also add to global-mode-string as fallback
-  ;; Use a format string so it's a constant that add-to-list can deduplicate
-  (unless (member 'transmit--modeline-string global-mode-string)
-    (add-to-list 'global-mode-string 'transmit--modeline-string t)))
-
-
-;;;; ---- Queue Popup ----------------------------------------------------------
-
-(defun transmit-show-queue-popup (&optional _event)
-  "Show a scrollable popup buffer listing the current upload queue."
-  (interactive)
-  (let* ((buf  (get-buffer-create "*transmit-queue*"))
-         (win  (get-buffer-window buf)))
-    ;; If already visible, just focus it
-    (if win
-        (select-window win)
-      (with-current-buffer buf
-        (transmit--render-queue-buffer))
-      (let ((win (display-buffer
-                  buf
-                  `(display-buffer-at-bottom
-                    . ((window-height . ,transmit-queue-popup-height)
-                       (preserve-size . (nil . t)))))))
-        (when win
-          (select-window win))))
-    ;; Set up auto-refresh inside the popup
-    (with-current-buffer buf
-      (setq-local revert-buffer-function
-                  (lambda (_ignore-auto _noconfirm)
-                    (transmit--render-queue-buffer)))
-      ;; q closes the popup
-      (local-set-key (kbd "q")
-                     (lambda ()
-                       (interactive)
-                       (quit-window t)))
-      ;; g refreshes
-      (local-set-key (kbd "g")
-                     (lambda ()
-                       (interactive)
-                       (transmit--render-queue-buffer))))))
-
-(defun transmit--render-queue-buffer ()
-  "Render the queue contents into the current buffer."
-  (let ((inhibit-read-only t)
-        (pos (point)))
-    (erase-buffer)
-    (insert (propertize "⇪ Transmit Upload Queue\n" 'face '(:weight bold :height 1.1)))
-    (insert (propertize (make-string 50 ?─) 'face '(:foreground "#4c566a")))
-    (insert "\n")
-    ;; Connection status
-    (let ((server (transmit--get-selected-server))
-          (remote (transmit--get-selected-remote)))
-      (if server
-          (insert (format "  Server : %s → %s  [%s]\n"
-                          (propertize server 'face '(:foreground "#88c0d0" :weight bold))
-                          (propertize (or remote "?") 'face '(:foreground "#88c0d0"))
-                          (cond (transmit--connection-ready
-                                 (propertize "connected" 'face '(:foreground "#a3be8c")))
-                                (transmit--connecting
-                                 (propertize "connecting…" 'face '(:foreground "#ebcb8b")))
-                                (t (propertize "disconnected" 'face '(:foreground "#bf616a"))))))
-        (insert (propertize "  No server selected for this project\n"
-                            'face '(:foreground "#616e88")))))
-    (insert "\n")
-    ;; Current upload progress
-    (let* ((progress (transmit-get-progress))
-           (file     (plist-get progress :file))
-           (pct      (or (plist-get progress :percent) 0)))
-      (when file
-        (insert (propertize "  Uploading now:\n" 'face '(:foreground "#ebcb8b")))
-        (insert (format "  %s\n" (propertize (file-name-nondirectory file)
-                                             'face '(:foreground "#eceff4"))))
-        (insert (format "  %s %d%%\n\n"
-                        (propertize (transmit--modeline-progress-bar pct 30)
-                                    'face '(:foreground "#a3be8c"))
-                        pct))))
-    ;; Queue
-    (let ((pending (cl-remove-if (lambda (i) (plist-get i :processing)) transmit--queue)))
-      (if (null pending)
-          (insert (propertize "  Queue is empty.\n" 'face '(:foreground "#616e88")))
-        (insert (propertize (format "  Queued (%d):\n" (length pending))
-                            'face '(:foreground "#ebcb8b")))
-        (cl-loop for item in pending
-                 for i from 1
-                 do (insert
-                     (format "  %2d. [%s] %s\n"
-                             i
-                             (propertize (plist-get item :type) 'face '(:foreground "#81a1c1"))
-                             (propertize (file-name-nondirectory (plist-get item :filename))
-                                         'face '(:foreground "#d8dee9")))))))
-    (insert "\n")
-    (insert (propertize "  q: close  g: refresh\n" 'face '(:foreground "#4c566a")))
-    (goto-char (min pos (point-max)))))
-
-;; Auto-refresh the queue buffer whenever the queue changes
-(defun transmit--maybe-refresh-queue-buffer ()
-  "If the queue popup is visible, refresh it."
-  (when-let ((buf (get-buffer "*transmit-queue*")))
-    (when (get-buffer-window buf)
-      (with-current-buffer buf
-        (transmit--render-queue-buffer)))))
-
-
-;;;; ---- Process: command dispatch --------------------------------------------
-
-(defun transmit--process-next ()
-  "Send the head of the queue to the live SFTP process."
-  (cl-block transmit--process-next
-    (let ((item (transmit--queue-head)))
-      (when (and item (not (plist-get item :processing)))
-        (let* ((cwd      (plist-get item :working-dir))
-               (filename (plist-get item :filename))
-               (cfg      (transmit--get-server-config cwd))
-               (data     (transmit--read-data))
-               (root     (transmit--project-root cwd))
-               (entry    (and data (gethash root data)))
-               (rname    (and entry (gethash "remote" entry)))
-               (remotes  (and cfg (gethash "remotes" cfg)))
-               (rbase    (and remotes rname (gethash rname remotes))))
-          (unless (and cfg rbase)
-            (transmit--log 4 (format "No remote configured for %s" cwd) t)
-            (transmit--dequeue)
-            (cl-return-from transmit--process-next nil))
-          (let* ((relative    (file-relative-name filename root))
-                 (remote-path (concat rbase "/" relative))
-                 (cmd (cl-case (intern (plist-get item :type))
-                        (upload (format "upload %s %s\n" filename remote-path))
-                        (remove (format "remove %s\n"    remote-path)))))
-            (when cmd
-              (plist-put item :processing t)
-              (transmit--start-modeline-timer)
-              (transmit--log 1 (format "Sending: %s" (string-trim cmd)))
-              (process-send-string transmit--process cmd))))))))
-
-
-;;;; ---- Process: output filter -----------------------------------------------
-
-(defun transmit--send (proc text)
-  "Send TEXT to PROC and log it at DEBUG level."
-  (transmit--log 1 (format "> %s" (string-trim text)))
-  (process-send-string proc text))
-
-(defun transmit--check-prompt (proc cfg)
-  "Check the incomplete accumulation buffer for handshake prompts and respond."
-  (let ((buf transmit--process-buf)
-        (creds (and cfg (gethash "credentials" cfg))))
-    (cond
-     ((and (string= transmit--phase transmit--phase-init)
-           (string-match-p "Enter SSH hostname" buf))
-      (transmit--send proc (concat (gethash "host" creds) "\n"))
-      (setq transmit--phase transmit--phase-username)
-      (setq transmit--process-buf ""))
-
-     ((and (string= transmit--phase transmit--phase-username)
-           (string-match-p "Enter SSH username" buf))
-      (transmit--send proc (concat (gethash "username" creds) "\n"))
-      (setq transmit--phase transmit--phase-auth-method)
-      (setq transmit--process-buf ""))
-
-     ((and (string= transmit--phase transmit--phase-auth-method)
-           (string-match-p "Authentication method" buf))
-      (let ((auth-type (or (gethash "auth_type" creds) "key")))
-        (transmit--send proc (concat auth-type "\n"))
-        (setq transmit--phase
-              (if (string= auth-type "password")
-                  transmit--phase-password
-                transmit--phase-key))
-        (setq transmit--process-buf "")))
-
-     ((and (string= transmit--phase transmit--phase-password)
-           (string-match-p "Enter password" buf))
-      (transmit--send proc (concat (gethash "password" creds) "\n"))
-      (setq transmit--phase transmit--phase-ready)
-      (setq transmit--process-buf ""))
-
-     ((and (string= transmit--phase transmit--phase-key)
-           (string-match-p "Enter path to private key" buf))
-      (transmit--send proc (concat (expand-file-name (gethash "identity_file" creds)) "\n"))
-      (setq transmit--phase transmit--phase-ready)
-      (setq transmit--process-buf "")))))
-
-(defun transmit--handle-line (line)
-  "Handle a complete newline-terminated LINE from the binary."
-  (transmit--log 1 (format "< %s" line))
-  (cond
-   ((and (string= transmit--phase transmit--phase-ready)
-         (string-match-p "Connected to" line))
-    (setq transmit--phase           transmit--phase-active
-          transmit--connecting      nil
-          transmit--connection-ready t)
-    (transmit--stop-auth-timeout)
-    (transmit--log 2 "SFTP connection established" t)
-    (transmit--modeline-refresh)
-    (when transmit--pending-callback
-      (let ((cb transmit--pending-callback))
-        (setq transmit--pending-callback nil)
-        (funcall cb))))
-
-   ((and (string= transmit--phase transmit--phase-active)
-         (string-match "^PROGRESS|\\(.*\\)|\\([0-9]+\\)$" line))
-    (let ((file (match-string 1 line))
-          (pct  (string-to-number (match-string 2 line))))
-      (when (and file (>= pct 0) (<= pct 100))
-        (setq transmit--current-progress (list :file file :percent pct))
-        (transmit--modeline-refresh)
-        (transmit--maybe-refresh-queue-buffer))))
-
-   ((and (string= transmit--phase transmit--phase-active)
-         (or (string-match-p "^1|Upload succeeded"  line)
-             (string-match-p "^1|Remove succeeded"  line)
-             (string-match-p "^0|"                  line)))
-    (let ((item (transmit--queue-head)))
-      (when (and item (plist-get item :processing))
-        (transmit--log 1 (format "Done %s: %s"
-                                 (plist-get item :type)
-                                 (plist-get item :filename)))
-        (transmit--dequeue)
-        (setq transmit--current-progress (list :file nil :percent nil))
-        (transmit--reset-keepalive)
-        (transmit--maybe-refresh-queue-buffer)
-        ;; Always try to process next regardless of queue length check
-        (if transmit--queue
-            (run-at-time 0.05 nil #'transmit--process-next)
-          (transmit--stop-modeline-timer)
-          (transmit--modeline-refresh)
-          (message "Transmit: All transfers complete")))))))
-
-(defun transmit--filter (proc string)
-  "Accumulate output STRING from PROC and drive the state machine."
-  (setq transmit--process-buf (concat transmit--process-buf string))
-  (let ((cfg (transmit--get-server-config)))
-    (unless (string= transmit--phase transmit--phase-active)
-      (transmit--check-prompt proc cfg))
-    (while (string-match "\n" transmit--process-buf)
-      (let* ((pos  (match-beginning 0))
-             (line (substring transmit--process-buf 0 pos)))
-        (setq transmit--process-buf (substring transmit--process-buf (1+ pos)))
-        (unless (string= (string-trim line) "")
-          (transmit--handle-line (string-trim line)))))))
-
-
-;;;; ---- Process: sentinel ----------------------------------------------------
-
-(defun transmit--sentinel (_proc event)
-  "Handle process lifecycle EVENT."
-  (transmit--log 3 (format "Process event: %s" (string-trim event)))
-  (setq transmit--connection-ready nil
-        transmit--process          nil
-        transmit--connecting       nil
-        transmit--current-progress (list :file nil :percent nil))
-  (transmit--stop-auth-timeout)
-  (transmit--stop-modeline-timer)
-  (transmit--modeline-refresh)
-  (unless transmit--is-exiting
-    (transmit--log 3 "SFTP connection lost, reconnecting..." t)
-    (dolist (item transmit--queue)
-      (plist-put item :processing nil))
-    (transmit--ensure-connection #'transmit--process-next)))
-
-
-;;;; ---- Connection lifecycle -------------------------------------------------
-
-(defun transmit--ensure-connection (&optional callback)
-  "Ensure an SFTP connection is live, then call CALLBACK."
-  (cl-block transmit--ensure-connection
-    (cond
-     ((and transmit--process transmit--connection-ready)
-      (when callback (funcall callback))
-      (transmit--reset-keepalive))
-
-     (transmit--connecting
-      (when callback
-        (let ((prev transmit--pending-callback))
-          (setq transmit--pending-callback
-                (if prev
-                    (lambda () (funcall prev) (funcall callback))
-                  callback)))))
-
-     (t
-      (let ((cfg (transmit--get-server-config)))
-        (unless cfg
-          (transmit--log 4 "No SFTP server configured for current project" t)
-          (cl-return-from transmit--ensure-connection nil))
-        (let ((binary (transmit--binary-path)))
-          (unless binary
-            (cl-return-from transmit--ensure-connection nil))
-          (setq transmit--connecting       t
-                transmit--phase            transmit--phase-init
-                transmit--process-buf      ""
-                transmit--pending-callback callback)
-          (transmit--start-auth-timeout)
-          (transmit--modeline-refresh)
-          (transmit--log 2
-            (format "Connecting to %s..."
-                    (gethash "host" (gethash "credentials" cfg))) t)
-          (setq transmit--process
-                (make-process
-                 :name            "transmit"
-                 :buffer          nil
-                 :command         (list binary)
-                 :connection-type 'pty
-                 :filter          #'transmit--filter
-                 :sentinel        #'transmit--sentinel
-                 :noquery         t))))))))
-
-
-;;;; ---- File exclusion -------------------------------------------------------
-
-(defun transmit--excluded-p (path)
-  "Return non-nil if PATH matches any exclusion pattern."
-  (cl-some (lambda (pat) (string-match-p pat path))
-           transmit--excluded-patterns))
-
-
-;;;; ---- File watching --------------------------------------------------------
-
-(defun transmit--watch-callback (event)
-  "Handle filenotify EVENT.
-Also starts watching newly-created directories automatically."
-  (let* ((action (nth 1 event))
-         (file   (nth 2 event)))
-    (when (and file (not (transmit--excluded-p file)))
-      (cond
-       ;; Newly created: if it's a directory, start watching it too
-       ((eq action 'created)
-        (if (file-directory-p file)
-            ;; New directory — add watchers for it and its children
-            (let ((root (transmit--find-watch-root file)))
-              (when root
-                (let* ((tbl   (gethash root transmit--watchers))
-                       (subdirs (transmit--list-subdirs file)))
-                  (dolist (dir subdirs)
-                    (unless (or (transmit--excluded-p dir) (gethash dir tbl))
-                      (condition-case err
-                          (puthash dir
-                                   (file-notify-add-watch
-                                    dir '(change) #'transmit--watch-callback)
-                                   tbl)
-                        (error (transmit--log 3 (format "Could not watch %s: %s"
-                                                        dir err)))))))))
-          ;; New regular file — upload it
-          (when (file-regular-p file)
-            (let ((root (transmit--find-watch-root file)))
-              (when root (transmit--enqueue "upload" file root))))))
-
-       ((eq action 'deleted)
-        (let ((root (transmit--find-watch-root file)))
-          (when root (transmit--enqueue "remove" file root))))
-
-       ((eq action 'changed)
-        (when (and (file-regular-p file)
-                   (not (transmit--excluded-p file))
-                   (not (transmit--recently-uploaded-p file)))
-          (let ((root (transmit--find-watch-root file)))
-            (when root (transmit--enqueue "upload" file root)))))))))
-
-(defun transmit--find-watch-root (file)
-  "Return the watch root that FILE lives under, or nil."
-  (cl-loop for root being the hash-keys of transmit--watchers
-           when (string-prefix-p root file)
-           return root))
-
-(defun transmit--watch-dir (root)
-  "Watch ROOT and all sub-directories.  Returns number of dirs watched."
-  (cl-block transmit--watch-dir
-    (when (gethash root transmit--watchers)
-      (message "Transmit: already watching %s" root)
-      (cl-return-from transmit--watch-dir 0))
-    (unless (file-directory-p root)
-      (transmit--log 4 (format "Not a directory: %s" root) t)
-      (cl-return-from transmit--watch-dir 0))
-    (let ((subdirs (transmit--list-subdirs root))
-          (tbl     (make-hash-table :test 'equal))
-          (count   0))
-      (puthash root tbl transmit--watchers)
-      (dolist (dir subdirs)
-        (unless (or (transmit--excluded-p dir) (gethash dir tbl))
-          (condition-case err
-              (progn
-                (puthash dir
-                         (file-notify-add-watch dir '(change) #'transmit--watch-callback)
-                         tbl)
-                (cl-incf count))
-            (error (transmit--log 3 (format "Could not watch %s: %s" dir err))))))
-      (message "Transmit: watching %d director%s under %s"
-               count (if (= count 1) "y" "ies") root)
-      count)))
-
-(defun transmit--list-subdirs (root)
-  "Return ROOT and all sub-directories, skipping excluded paths."
-  (let (result)
-    (when (file-directory-p root)
-      (push root result)
-      (dolist (entry (directory-files-recursively root "" t))
-        (when (and (file-directory-p entry) (not (transmit--excluded-p entry)))
-          (push entry result))))
-    result))
-
-(defun transmit--stop-watching (&optional root)
-  "Stop watching ROOT or all roots.  Returns count removed."
-  (let ((count 0))
-    (if root
-        (when-let ((tbl (gethash root transmit--watchers)))
-          (maphash (lambda (_dir desc)
-                     (condition-case nil (file-notify-rm-watch desc) (error nil))
-                     (cl-incf count))
-                   tbl)
-          (remhash root transmit--watchers))
-      (maphash (lambda (_root tbl)
-                 (maphash (lambda (_dir desc)
-                            (condition-case nil (file-notify-rm-watch desc) (error nil))
-                            (cl-incf count))
-                          tbl))
-               transmit--watchers)
-      (clrhash transmit--watchers))
-    count))
-
-
-;;;; ---- High-level file operations ------------------------------------------
-
-(defun transmit--upload (file &optional working-dir)
-  "Queue FILE for upload.  Returns queue-item ID or nil."
-  (cl-block transmit--upload
-    (let* ((f    (or file (buffer-file-name)))
-           (root (transmit--project-root (or working-dir default-directory))))
-      (unless f
-        (message "Transmit: buffer has no associated file")
-        (cl-return-from transmit--upload nil))
-      (unless (file-regular-p f)
-        (message "Transmit: not a regular file: %s" f)
-        (cl-return-from transmit--upload nil))
-      (unless (transmit--working-dir-has-selection-p root)
-        (message "Transmit: no server configured for project %s" root)
-        (cl-return-from transmit--upload nil))
-      (transmit--enqueue "upload" (expand-file-name f) root))))
-
-(defun transmit--remove (file &optional working-dir)
-  "Queue FILE for remote removal.  Returns queue-item ID or nil."
-  (cl-block transmit--remove
-    (let* ((f    (or file (buffer-file-name)))
-           (root (transmit--project-root (or working-dir default-directory))))
-      (unless f
-        (message "Transmit: buffer has no associated file")
-        (cl-return-from transmit--remove nil))
-      (unless (transmit--working-dir-has-selection-p root)
-        (message "Transmit: no server configured for project %s" root)
-        (cl-return-from transmit--remove nil))
-      (transmit--enqueue "remove" (expand-file-name f) root))))
-
-
-;;;; ---- Auto-upload on save --------------------------------------------------
-
-(defvar-local transmit--save-in-progress nil
-  "Buffer-local flag to prevent re-entrant after-save-hook calls.")
-
-(defun transmit--debounce-file (file)
-  "Mark FILE as recently uploaded for 2 seconds to suppress watcher dupes."
-  (puthash file t transmit--recent-uploads)
-  (run-at-time 2.0 nil (lambda () (remhash file transmit--recent-uploads))))
-
-(defun transmit--recently-uploaded-p (file)
-  "Return non-nil if FILE was uploaded in the last 2 seconds."
-  (gethash file transmit--recent-uploads))
-
-(defun transmit--after-save-hook ()
-  "Upload the saved buffer if its project has a server selected."
-  (when (and buffer-file-name
-             (not transmit--save-in-progress)
-             (transmit--working-dir-has-selection-p
-              (transmit--project-root default-directory)))
-    (setq transmit--save-in-progress t)
-    (unwind-protect
-        (let ((file (expand-file-name buffer-file-name))
-              (root (transmit--project-root default-directory)))
-          (unless (cl-some (lambda (item)
-                             (string= (plist-get item :filename) file))
-                           transmit--queue)
-            (transmit--debounce-file file)
-            (transmit--enqueue "upload" file root)))
-      (setq transmit--save-in-progress nil))))
-
-
-;;;; ---- Server / remote selection UI ----------------------------------------
-
-(defun transmit--server-names ()
-  "Return a sorted list of configured server names."
-  (let (names)
-    (maphash (lambda (k _v) (push k names)) transmit--server-config)
-    (sort names #'string<)))
-
-(defun transmit--remote-names (server-name)
-  "Return a sorted list of remote names for SERVER-NAME."
-  (let* ((cfg     (gethash server-name transmit--server-config))
-         (remotes (and cfg (gethash "remotes" cfg)))
-         names)
-    (when remotes (maphash (lambda (k _v) (push k names)) remotes))
-    (sort names #'string<)))
-
-
-;;;; ---- Setup ----------------------------------------------------------------
-
-;;;###autoload
-(defun transmit-setup (config-location)
-  "Initialise Transmit from the JSON config file at CONFIG-LOCATION."
-  (interactive "fTransmit config file: ")
-  (setq config-location (expand-file-name config-location))
-  (unless (file-exists-p config-location)
-    (user-error "Transmit: config file not found: %s" config-location))
-  (condition-case err
-      (let ((json-object-type 'hash-table)
-            (json-array-type  'list)
-            (json-key-type    'string))
-        (let ((parsed (json-read-file config-location)))
-          (clrhash transmit--server-config)
-          (maphash (lambda (k v) (puthash k v transmit--server-config)) parsed)
-          (transmit--log 2
-            (format "Loaded %d server(s) from %s"
-                    (hash-table-count transmit--server-config) config-location) t)))
-    (error (user-error "Transmit: failed to parse config: %s" err)))
-  (add-hook 'kill-emacs-hook #'transmit--on-kill-emacs)
-  (transmit--setup-modeline)
-  ;; Restore cached server/remote for modeline from persisted last-used
-  (let* ((data   (transmit--read-data))
-         (server (and data (gethash "__last_server__" data)))
-         (remote (and data (gethash "__last_remote__" data))))
-    (when server
-      (setq transmit--active-server server
-            transmit--active-remote remote)))
-  ;; Always render the modeline segment immediately
-  (transmit--modeline-refresh)
-  (let ((cfg (transmit--get-server-config)))
-    (when cfg
-      (when (gethash "upload_on_bufwrite" cfg) (transmit--install-auto-upload))
-      (when (gethash "watch_for_changes"  cfg) (transmit-watch-directory)))))
-
-(defun transmit--on-kill-emacs ()
-  "Clean up on Emacs exit."
-  (setq transmit--is-exiting t)
-  (transmit--stop-watching)
-  (transmit--stop-modeline-timer)
-  (when transmit--process
-    (condition-case nil
-        (process-send-string transmit--process "exit\n")
-      (error nil))
-    (delete-process transmit--process)
-    (setq transmit--process nil))
-  (when transmit--keepalive-timer    (cancel-timer transmit--keepalive-timer))
-  (when transmit--auth-timeout-timer (cancel-timer transmit--auth-timeout-timer))
-  (setq transmit--queue '()))
-
-(defun transmit--install-auto-upload ()
-  "Add the auto-upload after-save hook (idempotent)."
-  (unless transmit--auto-upload-hook-installed
-    (add-hook 'after-save-hook #'transmit--after-save-hook)
-    (setq transmit--auto-upload-hook-installed t)
-    (transmit--log 2 "Auto-upload on save enabled" t)))
-
-
-;;;; ---- Interactive commands -------------------------------------------------
-
-;;;###autoload
-(defun transmit-select-server ()
-  "Interactively pick a server and remote for the current project.
-The selection is remembered per project root and persisted to disk."
-  (interactive)
-  (let ((servers (transmit--server-names))
-        (root    (transmit--project-root)))
-    (unless servers (user-error "Transmit: no servers configured"))
-    (let* ((current-server (transmit--get-selected-server))
-           (current-remote (transmit--get-selected-remote))
-           (choice (completing-read
-                    (format "Transmit server for %s [current: %s]: "
-                            (abbreviate-file-name root)
-                            (if current-server
-                                (format "%s→%s" current-server current-remote)
-                              "none"))
-                    (cons "none" servers) nil t)))
-      (if (string= choice "none")
-          (progn
-            (transmit--update-selection "none" nil)
-            (message "Transmit: cleared server selection for %s"
-                     (abbreviate-file-name root)))
-        (let ((remotes (transmit--remote-names choice)))
-          (unless remotes
-            (user-error "Transmit: no remotes defined for server '%s'" choice))
-          (let ((remote (completing-read
-                         (format "Remote for %s: " choice) remotes nil t)))
-            (transmit--update-selection choice remote)
-            (message "Transmit: project %s → %s / %s"
-                     (abbreviate-file-name root) choice remote)
-            ;; Install auto-upload hook for this project
-            (transmit--install-auto-upload)
-            (let ((cfg (gethash choice transmit--server-config)))
-              (when (and cfg (gethash "watch_for_changes" cfg))
-                (transmit-watch-directory)))))))))
-
-;;;###autoload
-(defun transmit-upload-file (&optional file)
-  "Upload FILE (default: current buffer) to the configured remote."
-  (interactive)
-  (transmit--upload file))
-
-;;;###autoload
-(defun transmit-remove-file (&optional file)
-  "Remove FILE (default: current buffer) from the configured remote."
-  (interactive)
-  (transmit--remove file))
-
-;;;###autoload
-(defun transmit-watch-directory (&optional dir)
-  "Watch the project root (or DIR) for changes and auto-upload.
-Newly created files and directories are automatically watched."
-  (interactive)
-  (let* ((root (transmit--project-root dir))
-         (cfg  (transmit--get-server-config root)))
-    (unless cfg (user-error "Transmit: no server configured for project %s" root))
-    (transmit--watch-dir root)))
-
-;;;###autoload
-(defun transmit-stop-watching (&optional dir)
-  "Stop watching DIR's project, or all directories if DIR is nil."
-  (interactive)
-  (let* ((root (and dir (transmit--project-root dir)))
-         (n    (transmit--stop-watching root)))
-    (message "Transmit: removed %d watcher%s" n (if (= n 1) "" "s"))))
-
-;;;###autoload
-(defun transmit-disconnect ()
-  "Close the SFTP connection."
-  (interactive)
-  (if transmit--process
-      (progn
-        (process-send-string transmit--process "exit\n")
-        (message "Transmit: disconnecting..."))
-    (message "Transmit: not connected")))
-
-;;;###autoload
-(defun transmit-show-queue ()
-  "Display the upload queue in a dedicated buffer."
-  (interactive)
-  (transmit-show-queue-popup))
-
-;;;###autoload
-(defun transmit-clear-queue ()
-  "Remove all pending (non-active) items from the queue."
-  (interactive)
-  (let ((before (length transmit--queue)))
-    (setq transmit--queue
-          (cl-remove-if-not (lambda (i) (plist-get i :processing))
-                            transmit--queue))
-    (let ((n (- before (length transmit--queue))))
-      (transmit--modeline-refresh)
-      (transmit--maybe-refresh-queue-buffer)
-      (message "Transmit: cleared %d item%s" n (if (= n 1) "" "s")))))
-
-;;;###autoload
-(defun transmit-cancel-item (id)
-  "Cancel queue item ID (non-active items only)."
-  (interactive "nQueue item ID to cancel: ")
-  (let ((found (transmit--find-queue-item id)))
-    (if (null found)
-        (message "Transmit: item %d not found" id)
-      (let ((item (car found)))
-        (if (plist-get item :processing)
-            (message "Transmit: item %d is active, cannot cancel" id)
-          (setq transmit--queue
-                (cl-remove-if (lambda (i) (= (plist-get i :id) id))
-                              transmit--queue))
-          (transmit--modeline-refresh)
-          (transmit--maybe-refresh-queue-buffer)
-          (message "Transmit: cancelled item %d (%s)" id
-                   (file-name-nondirectory (plist-get item :filename))))))))
-
-;;;###autoload
-(defun transmit-show-log ()
-  "Switch to the Transmit debug log buffer."
-  (interactive)
-  (pop-to-buffer (get-buffer-create "*transmit-log*")))
-
-;;;###autoload
-(defun transmit-show-progress ()
-  "Echo the current transfer progress."
-  (interactive)
-  (let ((f   (plist-get transmit--current-progress :file))
-        (pct (plist-get transmit--current-progress :percent)))
-    (if f
-        (message "Transmit: uploading %s ... %d%%" (file-name-nondirectory f) pct)
-      (message "Transmit: no transfer in progress"))))
-
-;;;###autoload
-(defun transmit-status ()
-  "Show a one-line connection/queue summary."
-  (interactive)
-  (message "Transmit: project=%s  server=%s → %s  status=%s  queue=%d"
-           (abbreviate-file-name (transmit--project-root))
-           (or (transmit--get-selected-server) "none")
-           (or (transmit--get-selected-remote) "none")
-           (cond (transmit--connection-ready "connected")
-                 (transmit--connecting       "connecting...")
-                 (t                          "disconnected"))
-           (length transmit--queue)))
-
-
-;;;; ---- Public API -----------------------------------------------------------
-
-(defun transmit-get-progress ()      transmit--current-progress)
-(defun transmit-queue-length ()      (length transmit--queue))
-(defun transmit-connection-status () (cons transmit--connection-ready transmit--connecting))
-(defun transmit-current-server ()    (transmit--get-selected-server))
-(defun transmit-current-remote ()    (transmit--get-selected-remote))
-
-(provide 'transmit)
-;;; transmit.el ends here
+            (when (and buffer-file-name
+                       (string= (file-name-extension buffer-file-name) "twig"))
+              (lsp))))
+;;; ============================================================
+
+;; Registered here at the end so php-mode, lsp-mode, web-mode etc.
+;; are all guaranteed to be loaded before these hooks are added.
+(add-hook 'php-mode-hook           #'lsp)
+(add-hook 'php-ts-mode-hook        #'lsp)
+(add-hook 'js-ts-mode-hook         #'lsp)
+(add-hook 'typescript-ts-mode-hook #'lsp)
+(add-hook 'tsx-ts-mode-hook        #'lsp)
+(add-hook 'css-ts-mode-hook        #'lsp)
+(add-hook 'html-mode-hook          #'lsp)
+
+
+;;; ============================================================
+;;; FIRST-TIME SETUP INSTRUCTIONS (run once, then remove/ignore)
+;;; ============================================================
+
+;; After Emacs loads for the first time:
+;;
+;; 1. Install icon fonts (required for doom-modeline):
+;;      M-x nerd-icons-install-fonts  RET
+;;
+;; 2. Install Treesitter grammars (will prompt per grammar):
+;;      M-x treesit-auto-install-all  RET
+;;
+;; 3. Install language servers (put these in your PATH):
+;;      npm i -g intelephense                    ← PHP
+;;      npm i -g typescript typescript-language-server  ← JS/TS
+;;      npm i -g vscode-langservers-extracted     ← CSS/HTML/JSON
+;;
+;; 4. Install system tools:
+;;      brew install ripgrep fd cmake libvterm    ← macOS
+;;      apt install ripgrep fd-find cmake libvterm-dev  ← Linux
+;;        (libvterm + cmake are required for vterm)
+;;
+;; 5. Install prettier for apheleia formatting:
+;;      npm i -g prettier
+;;
+;; 6. Install mermaid CLI and grip for markdown rendering:
+;;      npm i -g @mermaid-js/mermaid-cli
+;;      pip install grip
+;;
+;; 7. Install Twig language server:
+;;      npm i -g twig-language-server
+
+
+;;; init.el ends here
