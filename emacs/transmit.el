@@ -409,9 +409,50 @@ Pass \"none\" to clear."
 
 ;;;; ---- Modeline -------------------------------------------------------------
 
+(defvar transmit--modeline-segment-form '(:eval (transmit--modeline-segment))
+  "Form evaluated by doom-modeline/mode-line to render the transmit segment.")
+
+(defun transmit--modeline-segment ()
+  "Compute and return the transmit modeline string live."
+  (let* ((progress  (transmit-get-progress))
+         (file      (plist-get progress :file))
+         (pct       (or (plist-get progress :percent) 0))
+         (queue-len (length transmit--queue))
+         (map       (make-sparse-keymap)))
+    (define-key map [mode-line mouse-1] #'transmit-show-queue-popup)
+    (define-key map [mode-line mouse-3] #'transmit-show-queue-popup)
+    (propertize
+     (concat
+      " ⇪ "
+      (if transmit--active-server
+          (propertize
+           (format "%s→%s" transmit--active-server transmit--active-remote)
+           'face (if transmit--connection-ready
+                     '(:foreground "#88c0d0" :weight bold)
+                   '(:foreground "#616e88")))
+        (propertize "no server" 'face '(:foreground "#4c566a")))
+      (when file
+        (concat
+         " "
+         (propertize (transmit--modeline-progress-bar pct 10)
+                     'face '(:foreground "#a3be8c"))
+         (propertize (format " %d%%" pct)
+                     'face '(:foreground "#a3be8c" :weight bold))))
+      (when (and (> queue-len 0) (not file))
+        (propertize (format " [%d]" queue-len)
+                    'face '(:foreground "#ebcb8b")))
+      " ")
+     'mouse-face 'mode-line-highlight
+     'local-map  map
+     'help-echo  (if transmit--active-server
+                     (format "SFTP: %s → %s | %d queued\nClick to show queue"
+                             transmit--active-server
+                             transmit--active-remote
+                             queue-len)
+                   "SFTP: no server selected\nClick to configure"))))
+
 (defun transmit--modeline-refresh ()
-  "Rebuild cached modeline string and force redisplay."
-  (transmit--update-modeline-string)
+  "Force modeline to redisplay."
   (force-mode-line-update t))
 
 (defun transmit--modeline-progress-bar (pct width)
@@ -423,60 +464,29 @@ Pass \"none\" to clear."
             (make-string empty ?░)
             "]")))
 
-(defvar transmit--modeline-string nil
-  "Cached modeline string, updated whenever state changes.")
-
-(defun transmit--update-modeline-string ()
-  "Recompute and cache the modeline string."
-  (setq transmit--modeline-string
-        (let* ((progress  (transmit-get-progress))
-               (file      (plist-get progress :file))
-               (pct       (or (plist-get progress :percent) 0))
-               (queue-len (length transmit--queue))
-               (map       (make-sparse-keymap)))
-          (define-key map [mode-line mouse-1] #'transmit-show-queue-popup)
-          (define-key map [mode-line mouse-3] #'transmit-show-queue-popup)
-          (propertize
-           (concat
-            " ⇪ "
-            (if transmit--active-server
-                (propertize
-                 (format "%s→%s" transmit--active-server transmit--active-remote)
-                 'face (if transmit--connection-ready
-                           '(:foreground "#88c0d0" :weight bold)
-                         '(:foreground "#616e88")))
-              (propertize "no server" 'face '(:foreground "#4c566a")))
-            (when file
-              (concat
-               " "
-               (propertize (transmit--modeline-progress-bar pct 10)
-                           'face '(:foreground "#a3be8c"))
-               (propertize (format " %d%%" pct)
-                           'face '(:foreground "#a3be8c" :weight bold))))
-            (when (and (> queue-len 0) (not file))
-              (propertize (format " [%d]" queue-len)
-                          'face '(:foreground "#ebcb8b")))
-            " ")
-           'mouse-face 'mode-line-highlight
-           'local-map  map
-           'help-echo  (if transmit--active-server
-                           (format "SFTP: %s → %s | %d queued\nClick to show queue"
-                                   transmit--active-server
-                                   transmit--active-remote
-                                   queue-len)
-                         "SFTP: no server selected\nClick to configure")))))
-
-(defun transmit--modeline-segment ()
-  "Return the cached transmit modeline string."
-  transmit--modeline-string)
+(defvar transmit--modeline-segment-form '(:eval (transmit--modeline-segment))
+  "Form evaluated by the mode-line to render the transmit segment.")
 
 (defun transmit--setup-modeline ()
   "Add transmit segment to the modeline (idempotent)."
-  ;; Use an (:eval ...) form so the keymap embedded in the string is always live.
-  ;; Store it under a named variable for deduplication.
-  (unless (member 'transmit--modeline-segment-form global-mode-string)
-    (defvar transmit--modeline-segment-form '(:eval (transmit--modeline-segment)))
-    (add-to-list 'global-mode-string 'transmit--modeline-segment-form t)))
+  (if (fboundp 'doom-modeline-def-segment)
+      ;; Define a doom-modeline segment and add it to the main modeline
+      (progn
+        (eval
+         '(doom-modeline-def-segment transmit
+            "SFTP status and upload progress."
+            (transmit--modeline-segment)))
+        ;; Redefine the main modeline to include our segment on the right side
+        (eval
+         '(doom-modeline-def-modeline 'main
+            '(bar workspace-name window-number modals matches follow buffer-info
+                  remote-host buffer-position word-count parrot selection-info)
+            '(misc-info transmit battery grip irc mu4e gnus debug repl lsp
+                        minor-modes input-method buffer-encoding major-mode
+                        process vcs checker))))
+    ;; Fallback: global-mode-string for non-doom modelines
+    (unless (member 'transmit--modeline-segment-form global-mode-string)
+      (add-to-list 'global-mode-string 'transmit--modeline-segment-form t))))
 
 
 ;;;; ---- Queue Popup ----------------------------------------------------------
