@@ -634,6 +634,8 @@ Pass \"none\" to clear."
 
         (transmit--modeline-refresh)
 
+        (transmit--start-modeline-timer) ; keep watchdog running while queue has items
+
         (transmit--ensure-connection #'transmit--process-next)
 
         id))))
@@ -754,28 +756,37 @@ Pass \"none\" to clear."
 
 (defun transmit--watchdog ()
 
-  "Refresh modeline and unstick queue if process has died or stalled."
+  "Refresh modeline and unstick queue if process has died or stalled.
+
+Also kicks the queue if it is idle but should be running."
 
   (force-mode-line-update t)
 
   (let ((head (transmit--queue-head)))
 
-    (when (and head (plist-get head :processing))
+    (when head
 
-      (let* ((started    (plist-get head :started-at))
+      (let* ((processing   (plist-get head :processing))
 
-             (elapsed    (and started (- (float-time) started)))
+             (started      (plist-get head :started-at))
+
+             (elapsed      (and started (- (float-time) started)))
 
              (process-dead (not (and transmit--process
+
                                      (process-live-p transmit--process))))
 
-             ;; Unstick if process died OR item has been processing too long
+             (stuck (and processing
 
-             (stuck (or process-dead
+                         (or process-dead
 
-                        (and elapsed (> elapsed transmit-stuck-timeout)))))
+                             (and elapsed (> elapsed transmit-stuck-timeout))))))
 
-        (when stuck
+        (cond
+
+         ;; Case 1: item actively processing but stuck — unstick and reconnect
+
+         (stuck
 
           (transmit--log 2
 
@@ -793,11 +804,27 @@ Pass \"none\" to clear."
 
                 transmit--connecting nil)
 
-          (when process-dead
+          (when process-dead (setq transmit--process nil))
 
-            (setq transmit--process nil))
+          (transmit--ensure-connection #'transmit--process-next))
 
-          (transmit--ensure-connection #'transmit--process-next))))))
+         ;; Case 2: queue has items, connection ready, but nothing is in flight
+
+         ;; Catches the case where process-next was never kicked after enqueue
+
+         ((and (not processing) transmit--connection-ready)
+
+          (transmit--log 1 "Watchdog: kicking idle queue")
+
+          (transmit--process-next))
+
+         ;; Case 3: queue has items but disconnected and not trying to reconnect
+
+          ((and (not processing) (not transmit--connecting) (not transmit--connection-ready))
+
+           (transmit--log 2 "Watchdog: queue idle and disconnected — reconnecting")
+
+           (transmit--ensure-connection #'transmit--process-next)))))))
 
 (defun transmit--stop-modeline-timer ()
 
